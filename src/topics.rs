@@ -1,24 +1,51 @@
 use streamdeck_lib::prelude::*;
 
-// ── Topic Definitions ─────────────────────────────────────────────────────────
-//
-// Topics are typed pub/sub channels used to decouple actions, adapters, and state.
-//
-// Define a topic:
-//   pub const MY_TOPIC: TopicId<MyPayload> = TopicId::new("myplugin.my-topic");
-//
-// Publish (from action, adapter, or hook):
-//   cx.bus().publish_t(MY_TOPIC, payload);
-//
-// Subscribe (in an action):
-//   fn topics(&self) -> &'static [&'static str] { &[MY_TOPIC.name] }
-//   fn on_notify(&mut self, cx: &Context, ctx_id: &str, event: &ErasedTopic) {
-//       if let Some(payload) = event.downcast(MY_TOPIC) { /* ... */ }
-//   }
-//
-// Subscribe (in an adapter):
-//   fn topics(&self) -> &'static [&'static str] { &[MY_TOPIC.name] }
-//   // received via the inbox channel in start()
+// ── Installation Changed ─────────────────────────────────────────────────────
 
-// Example:
-// pub const EXAMPLE_EVENT: TopicId<String> = TopicId::new("starcitizen.example-event");
+/// Published when the active installation switches.
+/// Actions should re-read from `ActiveInstallationState` for current data.
+pub const INSTALLATION_CHANGED: TopicId<InstallationChanged> =
+    TopicId::new("starcitizen.installation-changed");
+
+#[derive(Debug, Clone)]
+pub struct InstallationChanged;
+
+// ── Bindings Reloaded ────────────────────────────────────────────────────────
+
+/// Published after bindings are loaded (or fail to load).
+/// Actions should re-read from `BindingsState` for current data.
+pub const BINDINGS_RELOADED: TopicId<BindingsReloaded> =
+    TopicId::new("starcitizen.bindings-reloaded");
+
+#[derive(Debug, Clone)]
+pub struct BindingsReloaded;
+
+// ── Icon Folder Changed ──────────────────────────────────────────────────────
+
+/// Published when the global icon folder setting changes.
+/// Actions should re-read from `IconFolderState` for current path.
+pub const ICON_FOLDER_CHANGED: TopicId<IconFolderChanged> =
+    TopicId::new("starcitizen.icon-folder-changed");
+
+#[derive(Debug, Clone)]
+pub struct IconFolderChanged;
+
+// ── Bindings Reload Requested ────────────────────────────────────────────────
+
+/// Published by the binding file watcher when `actionmaps.xml` changes on disk.
+/// The handler should call `reload_bindings()` in response.
+pub const BINDINGS_RELOAD_REQUESTED: TopicId<BindingsReloadRequested> =
+    TopicId::new("starcitizen.bindings-reload-requested");
+
+#[derive(Debug, Clone)]
+pub struct BindingsReloadRequested;
+
+// ── Installations Refreshed ──────────────────────────────────────────────────
+
+/// Published after a full re-scan of installations.
+/// Actions should re-read from `ActiveInstallationState` for current data.
+pub const INSTALLATIONS_REFRESHED: TopicId<InstallationsRefreshed> =
+    TopicId::new("starcitizen.installations-refreshed");
+
+#[derive(Debug, Clone)]
+pub struct InstallationsRefreshed;
