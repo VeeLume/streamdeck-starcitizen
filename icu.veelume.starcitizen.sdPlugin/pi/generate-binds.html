@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="utf-8" />
+    <script src="sdpi-components.js"></script>
+</head>
+<body>
+    <sdpi-item label="Profile Name">
+        <sdpi-textfield setting="profileName" placeholder="icu-veelume-starcitizen"></sdpi-textfield>
+    </sdpi-item>
+    <sdpi-item label="Output Path">
+        <sdpi-textfield setting="outputPath" placeholder="Auto (install/user/client/0/controls/mappings)"></sdpi-textfield>
+    </sdpi-item>
+
+    <details>
+        <summary>Help</summary>
+        <sdpi-item label="">
+            <div class="sdpi-item-value" style="font-size: 11px; color: #999;">
+                <strong>Profile Name</strong> — name for the generated XML file and SC profile.<br/>
+                <strong>Output Path</strong> — override the output directory. Leave empty to auto-detect from the active installation.<br/>
+                <br/>
+                Press the button to generate conflict-free keyboard bindings for all unbound actions.
+                The generated file can be imported in Star Citizen's keybinding settings.<br/>
+                <br/>
+                Existing bindings (both default and user-customized) are respected — the generator
+                only assigns keys to actions that have no keyboard binding.<br/>
+                <br/>
+                <em>Note:</em> Generated bindings are written as an XML file for import into
+                Star Citizen's keybinding settings. They are not automatically loaded into the plugin —
+                use the Settings button to reload after importing.
+            </div>
+        </sdpi-item>
+    </details>
+</body>
+</html>

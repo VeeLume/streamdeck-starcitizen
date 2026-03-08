@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+
+<head lang="en">
+    <meta charset="utf-8" />
+    <title>Execute Action</title>
+    <script src="sdpi-components.js"></script>
+    <style>
+        .separator {
+            border: none;
+            border-top: 1px solid #444;
+            margin: 8px 0;
+        }
+
+        .secondary-section {
+            border-left: 2px solid #444;
+            margin-left: 4px;
+            padding-left: 8px;
+        }
+
+        .timing-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .timing-row input[type="number"] {
+            width: 80px;
+            background: #1e1e1e;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 3px 6px;
+            border-radius: 3px;
+        }
+
+        .timing-row span {
+            font-size: 11px;
+            color: #aaa;
+        }
+
+        .action-details summary {
+            font-size: 11px;
+            color: #888;
+            cursor: pointer;
+            margin-top: 2px;
+        }
+
+        .action-details .detail-row {
+            display: flex;
+            gap: 6px;
+            font-size: 11px;
+            color: #aaa;
+            margin-top: 3px;
+        }
+
+        .action-details .detail-label {
+            color: #666;
+            flex-shrink: 0;
+        }
+
+        .action-details .detail-value {
+            font-family: monospace;
+            word-break: break-all;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- ══════════════════════════ DISPLAY ══════════════════════════════ -->
+
+    <sdpi-item label="Title">
+        <sdpi-textfield setting="customTitle" placeholder="Auto from action name"></sdpi-textfield>
+    </sdpi-item>
+    <sdpi-item label="Icon" id="iconPickerItem">
+        <sdpi-select setting="iconFile" datasource="getIcons" placeholder="— none —" hot-reload>
+        </sdpi-select>
+    </sdpi-item>
+
+    <hr class="separator">
+
+    <!-- ═══════════════════════════ PRIMARY ACTION ══════════════════════ -->
+
+    <sdpi-item label="Category">
+        <sdpi-select setting="primaryMap" datasource="getCategories" placeholder="Choose a category..." hot-reload>
+        </sdpi-select>
+    </sdpi-item>
+    <sdpi-item label="Action">
+        <sdpi-select setting="primaryAction" datasource="getActions" placeholder="Choose an action..." hot-reload>
+        </sdpi-select>
+    </sdpi-item>
+
+    <sdpi-item label="Details">
+        <details class="action-details">
+            <summary>Label / Category / ID / Bind</summary>
+            <div class="detail-row">
+                <span class="detail-label">Label</span>
+                <span class="detail-value" id="primaryLabel">—</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Category</span>
+                <span class="detail-value" id="primaryCategory">—</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">ID</span>
+                <span class="detail-value" id="primaryId">—</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Bind</span>
+                <span class="detail-value" id="primaryBind">—</span>
+            </div>
+        </details>
+    </sdpi-item>
+
+    <!-- ══════════════════════════ HOLD ACTION ══════════════════════════ -->
+
+    <hr class="separator">
+
+    <sdpi-item label="Hold Action">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="holdEnabled">
+            <span>Execute a different action when held</span>
+        </label>
+    </sdpi-item>
+
+    <div id="holdSection" class="secondary-section" style="display:none">
+        <sdpi-item label="Category">
+            <sdpi-select setting="holdMap" datasource="getHoldCategories" placeholder="Choose a category..." hot-reload>
+            </sdpi-select>
+        </sdpi-item>
+        <sdpi-item label="Action">
+            <sdpi-select setting="holdAction" datasource="getHoldActions" placeholder="Choose an action..." hot-reload>
+            </sdpi-select>
+        </sdpi-item>
+        <sdpi-item label="Details">
+            <details class="action-details">
+                <summary>Label / Category / ID / Bind</summary>
+                <div class="detail-row">
+                    <span class="detail-label">Label</span>
+                    <span class="detail-value" id="holdLabel">—</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Category</span>
+                    <span class="detail-value" id="holdCategory">—</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">ID</span>
+                    <span class="detail-value" id="holdId">—</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Bind</span>
+                    <span class="detail-value" id="holdBind">—</span>
+                </div>
+            </details>
+        </sdpi-item>
+        <sdpi-item label="Threshold">
+            <div class="timing-row">
+                <input type="number" id="holdThresholdMs" min="100" max="5000" step="50" value="400">
+                <span>ms hold to trigger</span>
+            </div>
+        </sdpi-item>
+    </div>
+
+    <!-- ════════════════════════ DOUBLE-PRESS ACTION ════════════════════ -->
+
+    <hr class="separator">
+
+    <sdpi-item label="Double-Press">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="doublePressEnabled">
+            <span>Execute a different action on double-press</span>
+        </label>
+    </sdpi-item>
+
+    <div id="doublePressSection" class="secondary-section" style="display:none">
+        <sdpi-item label="Category">
+            <sdpi-select setting="doubleMap" datasource="getDoubleCategories" placeholder="Choose a category..."
+                hot-reload>
+            </sdpi-select>
+        </sdpi-item>
+        <sdpi-item label="Action">
+            <sdpi-select setting="doubleAction" datasource="getDoubleActions" placeholder="Choose an action..."
+                hot-reload>
+            </sdpi-select>
+        </sdpi-item>
+        <sdpi-item label="Details">
+            <details class="action-details">
+                <summary>Label / Category / ID / Bind</summary>
+                <div class="detail-row">
+                    <span class="detail-label">Label</span>
+                    <span class="detail-value" id="doublePressLabel">—</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Category</span>
+                    <span class="detail-value" id="doublePressCategory">—</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">ID</span>
+                    <span class="detail-value" id="doublePressId">—</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Bind</span>
+                    <span class="detail-value" id="doublePressBind">—</span>
+                </div>
+            </details>
+        </sdpi-item>
+        <sdpi-item label="Window">
+            <div class="timing-row">
+                <input type="number" id="doublePressWindowMs" min="100" max="2000" step="50" value="300">
+                <span>ms between presses</span>
+            </div>
+        </sdpi-item>
+    </div>
+
+    <!-- ════════════════════════════ INFO ═══════════════════════════════ -->
+
+    <hr class="separator">
+
+    <sdpi-item label="Info">
+        <details>
+            <summary>How it works</summary>
+            <p><strong>Short press</strong>: executes the primary SC Action when the button is pressed
+                (or released, if hold / double-press is also configured).</p>
+            <p><strong>Hold</strong>: if you hold the button for at least the threshold, the Hold Action
+                fires instead. The primary action does not fire.</p>
+            <p><strong>Double-press</strong>: press the button twice within the window to trigger the
+                Double-Press Action. The primary action fires only if no second press arrives within
+                the window.</p>
+            <p>Bindings must be loaded first (use the Settings button to refresh).</p>
+        </details>
+    </sdpi-item>
+
+    <script>
+        // Ask the plugin for current state once the PI is ready.
+        SDPIComponents.streamDeckClient.send('sendToPlugin', { action: 'getActionInfo' });
+
+        // ── Push handler — all state driven from Rust ─────────────────────────
+
+        SDPIComponents.streamDeckClient.sendToPropertyInspector.subscribe((msg) => {
+            const data = msg.payload;
+            if (!data) return;
+
+            if (data.type === 'actionInfo') {
+                // Primary details
+                document.getElementById('primaryLabel').textContent = data.primaryLabel || '\u2014';
+                document.getElementById('primaryCategory').textContent = data.primaryCategory || '\u2014';
+                document.getElementById('primaryId').textContent = data.primaryId || '\u2014';
+                document.getElementById('primaryBind').textContent = data.primaryBind || '\u2014';
+                // Hold details
+                document.getElementById('holdLabel').textContent = data.holdLabel || '\u2014';
+                document.getElementById('holdCategory').textContent = data.holdCategory || '\u2014';
+                document.getElementById('holdId').textContent = data.holdId || '\u2014';
+                document.getElementById('holdBind').textContent = data.holdBind || '\u2014';
+                // Double-press details
+                document.getElementById('doublePressLabel').textContent = data.doublePressLabel || '\u2014';
+                document.getElementById('doublePressCategory').textContent = data.doublePressCategory || '\u2014';
+                document.getElementById('doublePressId').textContent = data.doublePressId || '\u2014';
+                document.getElementById('doublePressBind').textContent = data.doublePressBind || '\u2014';
+            }
+
+            if (data.type === 'uiState') {
+                // Checkbox + section visibility — driven entirely by Rust.
+                document.getElementById('holdEnabled').checked = !!data.holdEnabled;
+                document.getElementById('holdSection').style.display = data.holdEnabled ? '' : 'none';
+                if (data.holdThresholdMs > 0) {
+                    document.getElementById('holdThresholdMs').value = data.holdThresholdMs;
+                }
+
+                document.getElementById('doublePressEnabled').checked = !!data.doublePressEnabled;
+                document.getElementById('doublePressSection').style.display = data.doublePressEnabled ? '' : 'none';
+                if (data.doublePressWindowMs > 0) {
+                    document.getElementById('doublePressWindowMs').value = data.doublePressWindowMs;
+                }
+            }
+        });
+
+        // ── Hold checkbox — tells Rust to enable/disable, Rust pushes uiState back ──
+
+        document.getElementById('holdEnabled').addEventListener('change', function (e) {
+            const ms = parseInt(document.getElementById('holdThresholdMs').value, 10) || 400;
+            SDPIComponents.streamDeckClient.send('sendToPlugin', {
+                action: 'setHoldEnabled',
+                enabled: e.target.checked,
+                thresholdMs: ms
+            });
+        });
+
+        document.getElementById('holdThresholdMs').addEventListener('change', function (e) {
+            const ms = parseInt(e.target.value, 10);
+            if (!isNaN(ms) && ms > 0) {
+                SDPIComponents.streamDeckClient.send('sendToPlugin', {
+                    action: 'setHoldThreshold',
+                    ms: ms
+                });
+            }
+        });
+
+        // ── Double-press checkbox ─────────────────────────────────────────────
+
+        document.getElementById('doublePressEnabled').addEventListener('change', function (e) {
+            const ms = parseInt(document.getElementById('doublePressWindowMs').value, 10) || 300;
+            SDPIComponents.streamDeckClient.send('sendToPlugin', {
+                action: 'setDoublePressEnabled',
+                enabled: e.target.checked,
+                windowMs: ms
+            });
+        });
+
+        document.getElementById('doublePressWindowMs').addEventListener('change', function (e) {
+            const ms = parseInt(e.target.value, 10);
+            if (!isNaN(ms) && ms > 0) {
+                SDPIComponents.streamDeckClient.send('sendToPlugin', {
+                    action: 'setDoublePressWindow',
+                    ms: ms
+                });
+            }
+        });
+    </script>
+</body>
+
+</html>

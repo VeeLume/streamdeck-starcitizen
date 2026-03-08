@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="utf-8" />
+    <script src="sdpi-components.js"></script>
+</head>
+<body>
+    <sdpi-item label="Auto-load Bindings">
+        <sdpi-checkbox setting="autoLoadBindings"></sdpi-checkbox>
+    </sdpi-item>
+    <sdpi-item label="Auto-select Channel">
+        <sdpi-checkbox setting="autoSelectLastLaunched"></sdpi-checkbox>
+    </sdpi-item>
+    <sdpi-item label="Icon Folder">
+        <sdpi-textfield setting="iconFolder" placeholder="Optional path to icon folder"></sdpi-textfield>
+    </sdpi-item>
+
+    <details>
+        <summary>Help</summary>
+        <sdpi-item label="">
+            <div class="sdpi-item-value" style="font-size: 11px; color: #999;">
+                <strong>Auto-load</strong> — reload bindings when installations are refreshed.<br/>
+                <strong>Auto-select</strong> — switch to the last launched channel on game start.<br/>
+                <strong>Icon Folder</strong> — optional path to custom SVG/PNG icons for actions.<br/>
+                <br/>
+                Press the button to refresh installations and reload bindings.
+            </div>
+        </sdpi-item>
+    </details>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="utf-8" />
+    <script src="sdpi-components.js"></script>
+    <style>
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <sdpi-item label="Mode">
+        <sdpi-select setting="mode" id="modeSelect">
+            <option value="show">Show</option>
+            <option value="pin">Pin</option>
+            <option value="cycle">Cycle</option>
+        </sdpi-select>
+    </sdpi-item>
+
+    <div id="pinSection" class="hidden">
+        <sdpi-item label="Channel">
+            <sdpi-select setting="pinnedChannel" datasource="getChannels" hot-reload></sdpi-select>
+        </sdpi-item>
+    </div>
+
+    <details>
+        <summary>Help</summary>
+        <sdpi-item label="">
+            <div class="sdpi-item-value" style="font-size: 11px; color: #999;">
+                <strong>Show</strong> — displays the active channel and version. Press to refresh.<br/>
+                <strong>Pin</strong> — switches to a specific channel when pressed.<br/>
+                <strong>Cycle</strong> — rotates through discovered installations. SD+ dial supported.
+            </div>
+        </sdpi-item>
+    </details>
+
+    <script>
+        // Ask Rust for current state once PI is ready
+        SDPIComponents.streamDeckClient.send('sendToPlugin', { action: 'getUiState' });
+
+        // ── Rust pushes uiState — drives visibility ───────────────────────────
+        SDPIComponents.streamDeckClient.sendToPropertyInspector.subscribe((msg) => {
+            const data = msg.payload;
+            if (!data || data.type !== 'uiState') return;
+
+            document.getElementById('pinSection').classList.toggle('hidden', data.mode !== 'pin');
+        });
+
+        // ── Mode change — notify Rust so it pushes updated uiState ────────────
+        // sdpi-components renders the real <select> asynchronously; observe until it appears
+        const modeSelect = document.getElementById('modeSelect');
+        const observer = new MutationObserver(() => {
+            const sel = modeSelect.querySelector('select');
+            if (sel) {
+                sel.addEventListener('change', () => {
+                    // sdpi-components auto-saves the setting; just ask Rust for fresh uiState
+                    // Small delay to let sdpi-components persist the setting first
+                    setTimeout(() => {
+                        SDPIComponents.streamDeckClient.send('sendToPlugin', { action: 'getUiState' });
+                    }, 50);
+                });
+                observer.disconnect();
+            }
+        });
+        observer.observe(modeSelect, { childList: true, subtree: true });
+    </script>
+</body>
+</html>
