@@ -6,6 +6,8 @@ use crate::PLUGIN_ID;
 use crate::discovery::Channel;
 use crate::render;
 use crate::state::installations::ActiveInstallationState;
+use crate::state::styles::StylesState;
+use crate::styles::KeyStyle;
 use crate::topics;
 
 // ── Mode ────────────────────────────────────────────────────────────────────────
@@ -33,6 +35,7 @@ impl Mode {
 pub struct ManageVersionAction {
     mode: Mode,
     pinned_channel: Option<Channel>,
+    key_style: String,
 }
 
 impl Default for ManageVersionAction {
@@ -40,6 +43,7 @@ impl Default for ManageVersionAction {
         Self {
             mode: Mode::Show,
             pinned_channel: None,
+            key_style: String::new(),
         }
     }
 }
@@ -57,6 +61,7 @@ impl Action for ManageVersionAction {
         &[
             topics::INSTALLATION_CHANGED.name,
             topics::INSTALLATIONS_REFRESHED.name,
+            topics::STYLE_CHANGED.name,
         ]
     }
 
@@ -135,31 +140,38 @@ impl Action for ManageVersionAction {
     }
 
     fn did_receive_sdpi_request(&mut self, cx: &Context, req: &DataSourceRequest<'_>) {
-        if req.event == "getChannels" {
-            let items = [
-                Channel::Live,
-                Channel::Hotfix,
-                Channel::Ptu,
-                Channel::Eptu,
-                Channel::TechPreview,
-            ]
-            .iter()
-            .map(|ch| {
-                DataSourceResultItem::Item(DataSourceItem {
-                    disabled: None,
-                    label: Some(ch.display_name().to_string()),
-                    value: ch.display_name().to_string(),
+        match req.event {
+            "getChannels" => {
+                let items = [
+                    Channel::Live,
+                    Channel::Hotfix,
+                    Channel::Ptu,
+                    Channel::Eptu,
+                    Channel::TechPreview,
+                ]
+                .iter()
+                .map(|ch| {
+                    DataSourceResultItem::Item(DataSourceItem {
+                        disabled: None,
+                        label: Some(ch.display_name().to_string()),
+                        value: ch.display_name().to_string(),
+                    })
                 })
-            })
-            .collect::<Vec<_>>();
+                .collect::<Vec<_>>();
 
-            cx.sdpi().reply(req, items);
+                cx.sdpi().reply(req, items);
+            }
+            "getStyles" => {
+                reply_styles(cx, req);
+            }
+            _ => {}
         }
     }
 
     fn on_notify(&mut self, cx: &Context, ctx_id: &str, event: &ErasedTopic) {
         if event.downcast(topics::INSTALLATION_CHANGED).is_some()
             || event.downcast(topics::INSTALLATIONS_REFRESHED).is_some()
+            || event.downcast(topics::STYLE_CHANGED).is_some()
         {
             self.render(cx, ctx_id);
         }
@@ -189,9 +201,21 @@ impl ManageVersionAction {
         if let Some(ch_val) = settings.get("pinnedChannel").and_then(|v| v.as_str()) {
             self.pinned_channel = Channel::from_str_loose(ch_val);
         }
+        if let Some(v) = settings.get("keyStyle").and_then(|v| v.as_str()) {
+            self.key_style = v.to_string();
+        }
+    }
+
+    fn resolve_style(&self, cx: &Context) -> KeyStyle {
+        if let Some(styles) = cx.try_ext::<StylesState>() {
+            crate::state::styles::resolve_style(&self.key_style, &styles, &cx.globals())
+        } else {
+            crate::styles::style_default()
+        }
     }
 
     fn render(&self, cx: &Context, ctx_id: &str) {
+        let style = self.resolve_style(cx);
         let state = cx.try_ext::<ActiveInstallationState>();
         let snap = state.as_ref().map(|s| s.snapshot());
         let current = snap.as_ref().and_then(|s| s.current());
@@ -204,9 +228,10 @@ impl ManageVersionAction {
                         ctx_id,
                         inst.channel.display_name(),
                         inst.short_version(),
+                        &style,
                     );
                 } else {
-                    render::render_progress(cx, ctx_id, "No SC\nfound");
+                    render::render_progress(cx, ctx_id, "No SC\nfound", &style);
                 }
             }
             Mode::Pin => {
@@ -218,7 +243,7 @@ impl ManageVersionAction {
                     (Some(pinned), Some(inst)) => inst.channel == pinned,
                     _ => false,
                 };
-                render::render_channel_pin(cx, ctx_id, channel_name, is_active);
+                render::render_channel_pin(cx, ctx_id, channel_name, is_active, &style);
             }
             Mode::Cycle => {
                 if let Some(inst) = current {
@@ -232,16 +257,18 @@ impl ManageVersionAction {
                         inst.channel.display_name(),
                         inst.short_version(),
                         next,
+                        &style,
                     );
                 } else {
-                    render::render_progress(cx, ctx_id, "No SC\nfound");
+                    render::render_progress(cx, ctx_id, "No SC\nfound", &style);
                 }
             }
         }
     }
 
     fn refresh_installations(&self, cx: &Context, ctx_id: &str) {
-        render::render_progress(cx, ctx_id, "Scanning\u{2026}");
+        let style = self.resolve_style(cx);
+        render::render_progress(cx, ctx_id, "Scanning\u{2026}", &style);
 
         let installations = crate::discovery::discover_installations();
         let count = installations.len();
@@ -267,4 +294,25 @@ impl ManageVersionAction {
         cx.bus()
             .publish_t(topics::INSTALLATION_CHANGED, topics::InstallationChanged);
     }
+}
+
+/// Reply to a `getStyles` datasource request.
+fn reply_styles(cx: &Context, req: &DataSourceRequest<'_>) {
+    let mut items = vec![DataSourceResultItem::Item(DataSourceItem {
+        disabled: None,
+        label: Some("\u{2014} global default \u{2014}".to_string()),
+        value: String::new(),
+    })];
+
+    if let Some(styles) = cx.try_ext::<StylesState>() {
+        for (id, name) in styles.list() {
+            items.push(DataSourceResultItem::Item(DataSourceItem {
+                disabled: None,
+                label: Some(name),
+                value: id,
+            }));
+        }
+    }
+
+    cx.sdpi().reply(req, items);
 }

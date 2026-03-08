@@ -1,3 +1,4 @@
+mod abbreviations;
 mod actions;
 mod adapters;
 mod bindings;
@@ -5,6 +6,7 @@ mod discovery;
 mod icons;
 mod render;
 mod state;
+mod styles;
 mod topics;
 
 use std::path::PathBuf;
@@ -19,8 +21,10 @@ use actions::generate_binds::GenerateBindsAction;
 use actions::manage_version::ManageVersionAction;
 use actions::settings::SettingsAction;
 use state::bindings::{BindingsData, BindingsState};
+use state::fonts::FontsState;
 use state::icon_folder::IconFolderState;
 use state::installations::ActiveInstallationState;
+use state::styles::StylesState;
 
 pub const PLUGIN_ID: &str = "icu.veelume.starcitizen";
 
@@ -49,7 +53,9 @@ fn main() -> anyhow::Result<()> {
         .set_hooks(hooks)
         .add_extension(Arc::new(ActiveInstallationState::new()))
         .add_extension(Arc::new(BindingsState::new()))
+        .add_extension(Arc::new(FontsState::load()))
         .add_extension(Arc::new(IconFolderState::new()))
+        .add_extension(Arc::new(StylesState::load()))
         .add_action(ActionFactory::default_of::<ManageVersionAction>())
         .add_action(ActionFactory::default_of::<ExecuteAction>())
         .add_action(ActionFactory::default_of::<SettingsAction>())

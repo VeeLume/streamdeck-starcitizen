@@ -9,6 +9,8 @@ use crate::render;
 use crate::state::bindings::BindingsState;
 use crate::state::icon_folder::IconFolderState;
 use crate::state::installations::ActiveInstallationState;
+use crate::state::styles::StylesState;
+use crate::styles::KeyStyle;
 use crate::topics;
 
 // ── Global settings keys ────────────────────────────────────────────────────────
@@ -16,6 +18,7 @@ use crate::topics;
 const KEY_AUTO_LOAD: &str = "autoLoadBindings";
 const KEY_AUTO_SELECT: &str = "autoSelectLastLaunched";
 const KEY_ICON_FOLDER: &str = "iconFolder";
+const KEY_DEFAULT_STYLE: &str = "defaultKeyStyle";
 
 // ── Action ──────────────────────────────────────────────────────────────────────
 
@@ -23,6 +26,7 @@ pub struct SettingsAction {
     auto_load: bool,
     auto_select_last: bool,
     icon_folder: String,
+    default_style: String,
 }
 
 impl Default for SettingsAction {
@@ -31,6 +35,7 @@ impl Default for SettingsAction {
             auto_load: true,
             auto_select_last: false,
             icon_folder: String::new(),
+            default_style: String::new(),
         }
     }
 }
@@ -49,6 +54,7 @@ impl Action for SettingsAction {
             topics::INSTALLATION_CHANGED.name,
             topics::INSTALLATIONS_REFRESHED.name,
             topics::BINDINGS_RELOAD_REQUESTED.name,
+            topics::STYLE_CHANGED.name,
         ]
     }
 
@@ -60,16 +66,22 @@ impl Action for SettingsAction {
     }
 
     fn did_receive_settings(&mut self, cx: &Context, ev: &DidReceiveSettings) {
+        let old_style = self.default_style.clone();
         // PI writes to per-action settings → promote to globals
         self.apply_settings(ev.settings);
         self.promote_to_globals(cx);
         self.handle_icon_folder_change(cx);
+        if self.default_style != old_style {
+            cx.bus()
+                .publish_t(topics::STYLE_CHANGED, topics::StyleChanged);
+        }
         self.render_status(cx, ev.context);
     }
 
     fn key_down(&mut self, cx: &Context, ev: &KeyDown) {
         debug!("SettingsAction key_down — refreshing");
-        render::render_progress(cx, ev.context, "Scanning\u{2026}");
+        let style = self.resolve_style(cx);
+        render::render_progress(cx, ev.context, "Scanning\u{2026}", &style);
 
         // Refresh installations
         let installations = crate::discovery::discover_installations();
@@ -102,10 +114,40 @@ impl Action for SettingsAction {
     fn on_global_event(&mut self, cx: &Context, ev: &IncomingEvent) {
         // Watch for global settings changes made by other Settings instances
         if let IncomingEvent::DidReceiveGlobalSettings { payload, .. } = ev {
-            let changed_folder = self.sync_from_global_map(&payload.settings);
+            let (changed_folder, changed_style) = self.sync_from_global_map(&payload.settings);
             if changed_folder {
                 self.handle_icon_folder_change(cx);
             }
+            if changed_style {
+                cx.bus()
+                    .publish_t(topics::STYLE_CHANGED, topics::StyleChanged);
+            }
+        }
+    }
+
+    fn did_receive_sdpi_request(&mut self, cx: &Context, req: &DataSourceRequest<'_>) {
+        if req.event == "getStyles" {
+            let mut items = vec![DataSourceResultItem::Item(DataSourceItem {
+                disabled: None,
+                label: Some("Default".to_string()),
+                value: String::new(),
+            })];
+
+            if let Some(styles) = cx.try_ext::<StylesState>() {
+                for (id, name) in styles.list() {
+                    // Skip "default" — the empty-value first item already covers it
+                    if id == "default" {
+                        continue;
+                    }
+                    items.push(DataSourceResultItem::Item(DataSourceItem {
+                        disabled: None,
+                        label: Some(name),
+                        value: id,
+                    }));
+                }
+            }
+
+            cx.sdpi().reply(req, items);
         }
     }
 
@@ -118,6 +160,7 @@ impl Action for SettingsAction {
         }
         if event.downcast(topics::INSTALLATION_CHANGED).is_some()
             || event.downcast(topics::INSTALLATIONS_REFRESHED).is_some()
+            || event.downcast(topics::STYLE_CHANGED).is_some()
         {
             self.render_status(cx, ctx_id);
         }
@@ -137,6 +180,9 @@ impl SettingsAction {
         if let Some(v) = settings.get(KEY_ICON_FOLDER).and_then(|v| v.as_str()) {
             self.icon_folder = v.to_string();
         }
+        if let Some(v) = settings.get(KEY_DEFAULT_STYLE).and_then(|v| v.as_str()) {
+            self.default_style = v.to_string();
+        }
     }
 
     fn hydrate_from_globals(&mut self, cx: &Context) {
@@ -152,6 +198,12 @@ impl SettingsAction {
             .and_then(|v| v.as_str().map(String::from))
         {
             self.icon_folder = v;
+        }
+        if let Some(v) = globals
+            .get(KEY_DEFAULT_STYLE)
+            .and_then(|v| v.as_str().map(String::from))
+        {
+            self.default_style = v;
         }
     }
 
@@ -170,17 +222,26 @@ impl SettingsAction {
                 KEY_ICON_FOLDER.into(),
                 serde_json::Value::String(self.icon_folder.clone()),
             );
+            map.insert(
+                KEY_DEFAULT_STYLE.into(),
+                serde_json::Value::String(self.default_style.clone()),
+            );
         });
     }
 
-    /// Sync local state from a global settings map, return true if icon folder changed.
+    /// Sync local state from a global settings map.
+    /// Returns `(icon_folder_changed, style_changed)`.
     fn sync_from_global_map(
         &mut self,
         settings: &serde_json::Map<String, serde_json::Value>,
-    ) -> bool {
+    ) -> (bool, bool) {
         let old_folder = self.icon_folder.clone();
+        let old_style = self.default_style.clone();
         self.apply_settings(settings);
-        self.icon_folder != old_folder
+        (
+            self.icon_folder != old_folder,
+            self.default_style != old_style,
+        )
     }
 
     fn handle_icon_folder_change(&self, cx: &Context) {
@@ -205,7 +266,21 @@ impl SettingsAction {
             .publish_t(topics::INSTALLATION_CHANGED, topics::InstallationChanged);
     }
 
+    /// Resolve the effective style for this action's rendering.
+    ///
+    /// The Settings action uses the global default style directly (since it
+    /// controls the global setting, it should reflect whatever the user chose).
+    fn resolve_style(&self, cx: &Context) -> KeyStyle {
+        if let Some(styles) = cx.try_ext::<StylesState>() {
+            // Use empty string for per-key — Settings action always uses the global default
+            crate::state::styles::resolve_style("", &styles, &cx.globals())
+        } else {
+            crate::styles::style_default()
+        }
+    }
+
     fn render_status(&self, cx: &Context, ctx_id: &str) {
+        let style = self.resolve_style(cx);
         let mut lines = Vec::new();
 
         // Installation info
@@ -233,6 +308,6 @@ impl SettingsAction {
             lines.join("\n")
         };
 
-        render::render_multiline(cx, ctx_id, &text);
+        render::render_multiline(cx, ctx_id, &text, &style);
     }
 }

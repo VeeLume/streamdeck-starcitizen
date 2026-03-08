@@ -7,6 +7,8 @@ use crate::bindings::autofill::{AutofillConfig, generate_bindings, render_xml};
 use crate::render;
 use crate::state::bindings::BindingsState;
 use crate::state::installations::ActiveInstallationState;
+use crate::state::styles::StylesState;
+use crate::styles::KeyStyle;
 use crate::topics;
 
 // ── Action ──────────────────────────────────────────────────────────────────────
@@ -16,6 +18,7 @@ pub struct GenerateBindsAction {
     profile_name: String,
     output_path_override: String,
     last_generated_count: Option<usize>,
+    key_style: String,
 }
 
 impl ActionStatic for GenerateBindsAction {
@@ -31,6 +34,7 @@ impl Action for GenerateBindsAction {
         &[
             topics::BINDINGS_RELOADED.name,
             topics::INSTALLATION_CHANGED.name,
+            topics::STYLE_CHANGED.name,
         ]
     }
 
@@ -47,7 +51,8 @@ impl Action for GenerateBindsAction {
 
     fn key_down(&mut self, cx: &Context, ev: &KeyDown) {
         debug!("GenerateBindsAction key_down");
-        render::render_progress(cx, ev.context, "Generating\u{2026}");
+        let style = self.resolve_style(cx);
+        render::render_progress(cx, ev.context, "Generating\u{2026}", &style);
 
         // Check bindings are loaded
         let Some(bindings_state) = cx.try_ext::<BindingsState>() else {
@@ -59,7 +64,7 @@ impl Action for GenerateBindsAction {
         let snap = bindings_state.snapshot();
         let Some(ref bindings) = snap.bindings else {
             warn!("No bindings loaded — load bindings first");
-            render::render_progress(cx, ev.context, "No bindings");
+            render::render_progress(cx, ev.context, "No bindings", &style);
             cx.sd().show_alert(ev.context);
             return;
         };
@@ -77,7 +82,7 @@ impl Action for GenerateBindsAction {
         if count == 0 {
             info!("No unbound actions found — nothing to generate");
             self.last_generated_count = Some(0);
-            render::render_progress(cx, ev.context, "0 binds\nAll bound!");
+            render::render_progress(cx, ev.context, "0 binds\nAll bound!", &style);
             cx.sd().show_ok(ev.context);
             self.render_status(cx, ev.context);
             return;
@@ -95,7 +100,7 @@ impl Action for GenerateBindsAction {
 
         let Some(output_dir) = output_dir else {
             warn!("Cannot determine output path — no active installation");
-            render::render_progress(cx, ev.context, "No install");
+            render::render_progress(cx, ev.context, "No install", &style);
             cx.sd().show_alert(ev.context);
             return;
         };
@@ -103,7 +108,7 @@ impl Action for GenerateBindsAction {
         // Ensure directory exists
         if let Err(e) = std::fs::create_dir_all(&output_dir) {
             warn!("Failed to create output directory: {e}");
-            render::render_progress(cx, ev.context, "Dir error");
+            render::render_progress(cx, ev.context, "Dir error", &style);
             cx.sd().show_alert(ev.context);
             return;
         }
@@ -120,12 +125,18 @@ impl Action for GenerateBindsAction {
             }
             Err(e) => {
                 warn!("Failed to write {}: {e}", output_path.display());
-                render::render_progress(cx, ev.context, "Write error");
+                render::render_progress(cx, ev.context, "Write error", &style);
                 cx.sd().show_alert(ev.context);
             }
         }
 
         self.render_status(cx, ev.context);
+    }
+
+    fn did_receive_sdpi_request(&mut self, cx: &Context, req: &DataSourceRequest<'_>) {
+        if req.event == "getStyles" {
+            reply_styles(cx, req);
+        }
     }
 
     fn on_notify(&mut self, cx: &Context, ctx_id: &str, event: &ErasedTopic) {
@@ -134,6 +145,8 @@ impl Action for GenerateBindsAction {
         {
             // Reset generation count when bindings or installation changes
             self.last_generated_count = None;
+            self.render_status(cx, ctx_id);
+        } else if event.downcast(topics::STYLE_CHANGED).is_some() {
             self.render_status(cx, ctx_id);
         }
     }
@@ -148,6 +161,9 @@ impl GenerateBindsAction {
         }
         if let Some(v) = settings.get("outputPath").and_then(|v| v.as_str()) {
             self.output_path_override = v.to_string();
+        }
+        if let Some(v) = settings.get("keyStyle").and_then(|v| v.as_str()) {
+            self.key_style = v.to_string();
         }
     }
 
@@ -173,7 +189,16 @@ impl GenerateBindsAction {
         )
     }
 
+    fn resolve_style(&self, cx: &Context) -> KeyStyle {
+        if let Some(styles) = cx.try_ext::<StylesState>() {
+            crate::state::styles::resolve_style(&self.key_style, &styles, &cx.globals())
+        } else {
+            crate::styles::style_default()
+        }
+    }
+
     fn render_status(&self, cx: &Context, ctx_id: &str) {
+        let style = self.resolve_style(cx);
         let mut lines = Vec::new();
 
         // Show binding count if available
@@ -202,6 +227,27 @@ impl GenerateBindsAction {
             lines.join("\n")
         };
 
-        render::render_centered(cx, ctx_id, &text);
+        render::render_centered(cx, ctx_id, &text, &style);
     }
+}
+
+/// Reply to a `getStyles` datasource request.
+fn reply_styles(cx: &Context, req: &DataSourceRequest<'_>) {
+    let mut items = vec![DataSourceResultItem::Item(DataSourceItem {
+        disabled: None,
+        label: Some("\u{2014} global default \u{2014}".to_string()),
+        value: String::new(),
+    })];
+
+    if let Some(styles) = cx.try_ext::<StylesState>() {
+        for (id, name) in styles.list() {
+            items.push(DataSourceResultItem::Item(DataSourceItem {
+                disabled: None,
+                label: Some(name),
+                value: id,
+            }));
+        }
+    }
+
+    cx.sdpi().reply(req, items);
 }

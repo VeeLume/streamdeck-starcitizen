@@ -49,3 +49,12 @@ pub const INSTALLATIONS_REFRESHED: TopicId<InstallationsRefreshed> =
 
 #[derive(Debug, Clone)]
 pub struct InstallationsRefreshed;
+
+// ── Style Changed ───────────────────────────────────────────────────────────
+
+/// Published when the global default style changes.
+/// Actions should re-render to reflect the new style.
+pub const STYLE_CHANGED: TopicId<StyleChanged> = TopicId::new("starcitizen.style-changed");
+
+#[derive(Debug, Clone)]
+pub struct StyleChanged;

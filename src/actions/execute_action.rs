@@ -10,7 +10,9 @@ use crate::bindings::executor::binding_to_combo;
 use crate::bindings::model::{Binding, Device, GameAction, ParsedBindings};
 use crate::render;
 use crate::state::bindings::BindingsState;
+use crate::state::fonts::FontsState;
 use crate::state::icon_folder::IconFolderState;
+use crate::state::styles::StylesState;
 use crate::topics;
 
 // ── Constants ───────────────────────────────────────────────────────────────────
@@ -34,6 +36,8 @@ pub struct ExecuteAction {
     double_window_ms: u64,
     custom_title: String,
     icon_file: String,
+    key_style: String,
+    key_font: String,
 
     // Runtime state for press detection
     key_down_at: Option<Instant>,
@@ -56,6 +60,8 @@ impl Default for ExecuteAction {
             double_window_ms: DEFAULT_DOUBLE_WINDOW_MS,
             custom_title: String::new(),
             icon_file: String::new(),
+            key_style: String::new(),
+            key_font: String::new(),
             key_down_at: None,
             last_up_at: None,
             awaiting_double: false,
@@ -76,6 +82,7 @@ impl Action for ExecuteAction {
         &[
             topics::BINDINGS_RELOADED.name,
             topics::ICON_FOLDER_CHANGED.name,
+            topics::STYLE_CHANGED.name,
         ]
     }
 
@@ -277,6 +284,12 @@ impl Action for ExecuteAction {
             "getIcons" => {
                 self.reply_icons(cx, req);
             }
+            "getStyles" => {
+                reply_styles(cx, req);
+            }
+            "getFonts" => {
+                reply_fonts(cx, req);
+            }
             _ => {}
         }
     }
@@ -284,6 +297,7 @@ impl Action for ExecuteAction {
     fn on_notify(&mut self, cx: &Context, ctx_id: &str, event: &ErasedTopic) {
         if event.downcast(topics::BINDINGS_RELOADED).is_some()
             || event.downcast(topics::ICON_FOLDER_CHANGED).is_some()
+            || event.downcast(topics::STYLE_CHANGED).is_some()
         {
             self.render_button(cx, ctx_id);
         }
@@ -330,6 +344,12 @@ impl ExecuteAction {
         if let Some(v) = settings.get("iconFile").and_then(|v| v.as_str()) {
             self.icon_file = v.to_string();
         }
+        if let Some(v) = settings.get("keyStyle").and_then(|v| v.as_str()) {
+            self.key_style = v.to_string();
+        }
+        if let Some(v) = settings.get("keyFont").and_then(|v| v.as_str()) {
+            self.key_font = v.to_string();
+        }
     }
 
     fn render_button(&self, cx: &Context, ctx_id: &str) {
@@ -369,7 +389,20 @@ impl ExecuteAction {
             "No Action".to_string()
         };
 
-        render::render_label(cx, ctx_id, &label, &streamdeck_render::BorderStyle::None);
+        let mut style = if let Some(styles) = cx.try_ext::<StylesState>() {
+            crate::state::styles::resolve_style(&self.key_style, &styles, &cx.globals())
+        } else {
+            crate::styles::style_default()
+        };
+        // Per-key font overrides the style's font
+        if !self.key_font.is_empty() {
+            style.font = self.key_font.clone();
+        }
+        // Don't abbreviate user-entered custom titles
+        if !self.custom_title.is_empty() {
+            style.abbreviate = false;
+        }
+        render::render_label(cx, ctx_id, &label, &style);
     }
 
     fn derive_label(&self, cx: &Context) -> String {
@@ -538,6 +571,8 @@ impl ExecuteAction {
         map.insert("doubleWindow".into(), self.double_window_ms.into());
         map.insert("customTitle".into(), self.custom_title.clone().into());
         map.insert("iconFile".into(), self.icon_file.clone().into());
+        map.insert("keyStyle".into(), self.key_style.clone().into());
+        map.insert("keyFont".into(), self.key_font.clone().into());
         cx.sd().set_settings(ctx_id, map);
     }
 
@@ -686,6 +721,48 @@ impl ExecuteAction {
         });
         result.unwrap_or_default()
     }
+}
+
+/// Reply to a `getFonts` datasource request with all available fonts.
+fn reply_fonts(cx: &Context, req: &DataSourceRequest<'_>) {
+    let mut items = vec![DataSourceResultItem::Item(DataSourceItem {
+        disabled: None,
+        label: Some("\u{2014} style default \u{2014}".to_string()),
+        value: String::new(),
+    })];
+
+    if let Some(fonts) = cx.try_ext::<FontsState>() {
+        for (id, name) in fonts.list() {
+            items.push(DataSourceResultItem::Item(DataSourceItem {
+                disabled: None,
+                label: Some(name),
+                value: id,
+            }));
+        }
+    }
+
+    cx.sdpi().reply(req, items);
+}
+
+/// Reply to a `getStyles` datasource request with all available styles.
+fn reply_styles(cx: &Context, req: &DataSourceRequest<'_>) {
+    let mut items = vec![DataSourceResultItem::Item(DataSourceItem {
+        disabled: None,
+        label: Some("\u{2014} global default \u{2014}".to_string()),
+        value: String::new(),
+    })];
+
+    if let Some(styles) = cx.try_ext::<StylesState>() {
+        for (id, name) in styles.list() {
+            items.push(DataSourceResultItem::Item(DataSourceItem {
+                disabled: None,
+                label: Some(name),
+                value: id,
+            }));
+        }
+    }
+
+    cx.sdpi().reply(req, items);
 }
 
 /// Format a binding for human-readable display in the PI.
