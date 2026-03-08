@@ -46,8 +46,12 @@
             "command": "pwsh",
             "args": [
                 "-NoProfile",
-                "-Command",
-                "$level = '${input:releaseLevel}'; Write-Host \"▶ Releasing ($level)...\" -ForegroundColor Cyan; Write-Host '▶ Checking for uncommitted changes...' -ForegroundColor Yellow; $status = git status --porcelain; if ($status) { Write-Error \"Working tree is dirty. Commit or stash changes first.\"; exit 1 }; Write-Host '▶ Preview: upcoming changelog' -ForegroundColor Yellow; git-cliff --unreleased --strip header; Write-Host ''; Write-Host \"▶ Running cargo release $level --execute\" -ForegroundColor Yellow; cargo release $level --execute; Write-Host '✓ Release complete! GitHub Actions will build and publish.' -ForegroundColor Green"
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/scripts/release.ps1",
+                "-Level",
+                "${input:releaseLevel}"
             ],
             "problemMatcher": [],
             "presentation": {
