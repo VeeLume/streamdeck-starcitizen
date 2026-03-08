@@ -87,10 +87,10 @@ impl Action for ManageVersionAction {
         ev: &DidReceivePropertyInspectorMessage,
         _is_sdpi: bool,
     ) {
-        if let Some(action) = ev.payload.get("action").and_then(|v| v.as_str()) {
-            if action == "getUiState" {
-                self.send_ui_state(cx, ev.context);
-            }
+        if let Some(action) = ev.payload.get("action").and_then(|v| v.as_str())
+            && action == "getUiState"
+        {
+            self.send_ui_state(cx, ev.context);
         }
     }
 

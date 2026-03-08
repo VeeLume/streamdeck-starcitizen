@@ -53,10 +53,9 @@ pub fn parse_user_overlay(xml: &str) -> Result<Vec<UserOverride>> {
                 if let Some(input) = rebind.attribute("input")
                     && !input.is_empty()
                     && input != " "
+                    && let Some(binding) = parse_rebind_input(input)
                 {
-                    if let Some(binding) = parse_rebind_input(input) {
-                        bindings.push(binding);
-                    }
+                    bindings.push(binding);
                 }
             }
 
@@ -126,10 +125,10 @@ fn strip_device_prefix(input: &str) -> &str {
     let lower = input.to_lowercase();
     // Handle kbN_, moN_, gpN_, jsN_ prefixes
     for prefix in &["kb", "mo", "gp", "js"] {
-        if lower.starts_with(prefix) {
-            if let Some(pos) = input.find('_') {
-                return &input[pos + 1..];
-            }
+        if lower.starts_with(prefix)
+            && let Some(pos) = input.find('_')
+        {
+            return &input[pos + 1..];
         }
     }
     // Handle "keyboard+", "mouse+" etc.

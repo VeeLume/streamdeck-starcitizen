@@ -85,11 +85,11 @@ fn on_startup(cx: &Context) {
         );
 
         // Publish the initial active installation
-        if let Some(state) = cx.try_ext::<ActiveInstallationState>() {
-            if state.snapshot().current().is_some() {
-                cx.bus()
-                    .publish_t(topics::INSTALLATION_CHANGED, topics::InstallationChanged);
-            }
+        if let Some(state) = cx.try_ext::<ActiveInstallationState>()
+            && state.snapshot().current().is_some()
+        {
+            cx.bus()
+                .publish_t(topics::INSTALLATION_CHANGED, topics::InstallationChanged);
         }
 
         // Auto-load bindings on startup (default: on)
@@ -141,11 +141,11 @@ fn on_game_launch(cx: &Context, app: &str) {
     );
 
     // Publish installation changed
-    if let Some(state) = cx.try_ext::<ActiveInstallationState>() {
-        if state.snapshot().current().is_some() {
-            cx.bus()
-                .publish_t(topics::INSTALLATION_CHANGED, topics::InstallationChanged);
-        }
+    if let Some(state) = cx.try_ext::<ActiveInstallationState>()
+        && state.snapshot().current().is_some()
+    {
+        cx.bus()
+            .publish_t(topics::INSTALLATION_CHANGED, topics::InstallationChanged);
     }
 
     // Auto-load bindings if enabled

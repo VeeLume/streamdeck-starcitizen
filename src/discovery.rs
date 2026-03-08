@@ -134,14 +134,14 @@ pub fn read_build_manifest(install_path: &Path) -> Result<(String, String, Strin
         .with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
 
     // New format: extract from nested Data object
-    if let Some(data) = &manifest.data {
-        if !data.version.is_empty() {
-            return Ok((
-                data.version.clone(),
-                data.branch.clone(),
-                data.build_id.clone(),
-            ));
-        }
+    if let Some(data) = &manifest.data
+        && !data.version.is_empty()
+    {
+        return Ok((
+            data.version.clone(),
+            data.branch.clone(),
+            data.build_id.clone(),
+        ));
     }
 
     // Legacy format: extract version from P4K filename

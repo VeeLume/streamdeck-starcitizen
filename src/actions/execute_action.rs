@@ -547,7 +547,7 @@ impl ExecuteAction {
                         .bindings
                         .iter()
                         .find(|b| matches!(b.device, Device::Keyboard | Device::Mouse))
-                        .map(|b| format_binding_display(b))
+                        .map(format_binding_display)
                         .unwrap_or_else(|| "(no keyboard bind)".to_string());
                     (label, bind)
                 }

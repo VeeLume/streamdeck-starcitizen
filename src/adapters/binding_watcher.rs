@@ -117,8 +117,8 @@ impl Adapter for BindingWatcherAdapter {
                 select! {
                     recv(stop_rx) -> _ => break,
                     recv(inbox) -> msg => {
-                        if let Ok(ev) = msg {
-                            if ev.downcast(topics::INSTALLATION_CHANGED).is_some() {
+                        if let Ok(ev) = msg
+                            && ev.downcast(topics::INSTALLATION_CHANGED).is_some() {
                                 // Drop old watcher (stops the watch), set up for new path
                                 active_watcher = resolve_overlay_path(&install_state)
                                     .and_then(|p| create_watcher(&p, file_tx.clone()));
@@ -126,7 +126,6 @@ impl Adapter for BindingWatcherAdapter {
                                     info!("BindingWatcher: installation cleared, watcher removed");
                                 }
                             }
-                        }
                     },
                     recv(file_rx) -> _ => {
                         if last_reload.elapsed() >= debounce {

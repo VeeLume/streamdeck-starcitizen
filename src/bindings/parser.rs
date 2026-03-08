@@ -135,20 +135,20 @@ fn parse_game_action(node: &roxmltree::Node, translations: &Translations) -> Opt
     // 1. Parse device attribute bindings (defaultProfile format)
     //    e.g. keyboard="ralt+y", gamepad="shoulderl+a"
     for &(attr, device) in DEVICE_ATTRS {
-        if let Some(value) = node.attribute(attr) {
-            if let Some(binding) = parse_attribute_binding(value, device, attr) {
-                bindings.push(binding);
-            }
+        if let Some(value) = node.attribute(attr)
+            && let Some(binding) = parse_attribute_binding(value, device, attr)
+        {
+            bindings.push(binding);
         }
     }
 
     // 2. Parse device-specific child overrides (e.g. <gamepad input="..."/>)
     for &(tag, device) in DEVICE_ATTRS {
         for child in node.children().filter(|n| n.has_tag_name(tag)) {
-            if let Some(value) = child.attribute("input") {
-                if let Some(binding) = parse_attribute_binding(value, device, tag) {
-                    bindings.push(binding);
-                }
+            if let Some(value) = child.attribute("input")
+                && let Some(binding) = parse_attribute_binding(value, device, tag)
+            {
+                bindings.push(binding);
             }
         }
     }
