@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) and other coding age
 
 ## Project Overview
 
-**streamdeck-starcitizen** is a Rust-based Elgato Stream Deck plugin using the [`streamdeck-lib`](https://github.com/veelume/streamdeck-lib) framework.
+**streamdeck-starcitizen** is a Rust-based Elgato Stream Deck plugin for **Star Citizen**, built on the [`streamdeck-lib`](https://github.com/veelume/streamdeck-lib) framework. It lets players execute any in-game action from a Stream Deck button. For actions that lack a keyboard shortcut, the plugin can generate a keybinding profile to import into the game.
 
 **Platform:** Windows-only. The binary runs as a child process of the Stream Deck application, communicating over a local WebSocket.
+
+**Domain knowledge:** See [`docs/star-citizen-domain.md`](docs/star-citizen-domain.md) for how Star Citizen's keybinding system, installations, and translations work.
 
 ## Architecture
 
@@ -590,21 +592,66 @@ cargo release patch   # or: minor, major
 
 | Crate | Purpose | Notes |
 |-------|---------|-------|
-| `streamdeck-lib` | SD protocol, actions, adapters, bus | Git dep, pinned to tag |
-| `streamdeck-render` | PNG icon rendering with custom fonts | Git dep, optional |
+| `streamdeck-lib` | SD protocol, actions, adapters, bus, input execution | Git dep, pinned to tag v0.5.0 |
+| `streamdeck-render` | PNG icon rendering with custom fonts | Git dep, pinned to tag v0.1.3 |
+| `svarog-p4k` / `svarog-cryxml` | Read SC's Data.p4k archives + CryXML conversion | Git dep, pinned to tag v1.4.0 |
+| `roxmltree` | XML parsing for binding files | |
+| `notify` | File system watcher (binding live reload) | |
+| `arc-swap` | Lock-free state stores | |
+| `crossbeam-channel` | Multi-producer channels for adapters | |
+| `encoding_rs` | UTF-16 LE decoding (global.ini translations) | |
 | `constcat` | Compile-time string concat for action IDs | |
 | `anyhow` | Error handling | |
 | `serde` / `serde_json` | Settings serialization | |
 | `tracing` | Structured logging | |
+| `base64` | Base64 encoding for data URLs | |
+
+## Domain Modules
+
+Beyond the framework concepts (actions, adapters, state, topics), the plugin has these domain-specific modules:
+
+### Bindings subsystem (`src/bindings/`)
+
+| Module | Purpose |
+|--------|---------|
+| `model.rs` | Data structures: `ParsedBindings`, `ActionMap`, `GameAction`, `Binding`, `Device` |
+| `parser.rs` | Parse `defaultProfile.xml` from SC's Data.p4k archive |
+| `overlay.rs` | Parse and merge user `actionmaps.xml` customizations on top of defaults |
+| `translations.rs` | Parse `global.ini` for `@ui_*` label translations |
+| `executor.rs` | Convert a parsed binding to key+modifiers and simulate via `InputAdapter` |
+| `autofill.rs` | Generate conflict-free keyboard shortcuts for unbound actions |
+| `p4k.rs` | Extract files from SC's `Data.p4k` proprietary archive (uses `svarog-p4k`) |
+
+### Discovery (`src/discovery.rs`)
+
+Parses the RSI Launcher log (`%APPDATA%/rsilauncher/logs/log.log`) to find SC installations, reads `build_manifest.id` for version info.
+
+### Rendering (`src/render.rs`, `src/styles.rs`)
+
+Renders full-PNG button faces using `streamdeck-render`. Handles multi-line word wrapping, auto-scaling, abbreviations, and progress overlays.
+
+### Support modules
+
+| Module | Purpose |
+|--------|---------|
+| `icons.rs` | Fuzzy match icon filenames to action names/labels |
+| `abbreviations.rs` | ~60-entry word abbreviation table for fitting text on 144px buttons |
+| `styles.rs` | `KeyStyle` definitions (colors, fonts, borders), built-in presets + user JSON styles |
+
+### User data paths
+
+| Path | Content |
+|------|---------|
+| `%APPDATA%/icu.veelume.starcitizen/fonts/` | User `.ttf`/`.otf` fonts (loaded at startup) |
+| `%APPDATA%/icu.veelume.starcitizen/styles/` | User JSON key styles (loaded at startup) |
 
 ### Reduction checklist
 
 | Concern | Fix |
 |---------|-----|
 | Heap grows over time | Use `dhat` to find the retaining allocation; check for unbounded caches or `Vec` that never shrinks |
-| High idle CPU | Use `tokio-console` to find tasks with high poll counts; check for tight polling loops |
+| High idle CPU | Check for tight polling loops in adapters |
 | Large baseline RSS | Strip release binary (`strip = "symbols"` is set); consider `jemalloc` → `mimalloc` swap if needed |
-| Slow key response | `tokio-console` → sort by max-poll-duration; look for blocking calls inside async tasks |
 | Big allocations at startup | `profiling::log_memory("before-load")` + `("after-load")` to isolate; use `dhat` |
 
 ### Binary size
@@ -624,22 +671,3 @@ cargo install cargo-bloat
 cargo bloat --release --crates   # size per crate
 cargo bloat --release -n 20      # top 20 functions by size
 ```
-
----
-
-## Workspace Conversion
-
-For larger plugins, convert to a workspace:
-
-```toml
-# Cargo.toml (root)
-[workspace]
-members = ["crates/core", "crates/plugin", "crates/cli"]
-resolver = "2"
-
-[workspace.dependencies]
-streamdeck-lib = { git = "...", tag = "v0.5.0" }
-# ... shared deps
-```
-
-Split domain logic into `crates/core` (library) and keep plugin-specific code in `crates/plugin`.
