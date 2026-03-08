@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+env:
+  PLUGIN_UUID: icu.veelume.starcitizen
+  PLUGIN_DIR: icu.veelume.starcitizen.sdPlugin
+  # Name of the [[bin]] target or crate name that produces the exe.
+  # Adjust if you use a custom [[bin]] name.
+  BINARY_NAME: plugin
+
+jobs:
+  build:
+    name: Build & Pack
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history needed for git-cliff
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry + build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Rust preflight
+        shell: pwsh
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features
+          cargo check --all-targets --all-features
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Copy binary into plugin folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:PLUGIN_DIR/bin" | Out-Null
+          Copy-Item "target/release/$env:BINARY_NAME.exe" "$env:PLUGIN_DIR/bin/$env:PLUGIN_UUID.exe" -Force
+
+      - name: Sync manifest version
+        shell: pwsh
+        run: |
+          $manifest = Join-Path $env:PLUGIN_DIR 'manifest.json'
+          $j = Get-Content $manifest -Raw | ConvertFrom-Json
+          $ver = "${{ steps.version.outputs.version }}.${{ github.run_number }}"
+          $j.Version = $ver
+          $j | ConvertTo-Json -Depth 64 | Set-Content $manifest -Encoding UTF8
+
+      - name: Install Elgato Stream Deck CLI
+        run: npm install -g @elgato/cli@latest
+
+      - name: Validate plugin
+        run: streamdeck validate ${{ env.PLUGIN_DIR }}
+
+      - name: Pack plugin
+        run: streamdeck pack ${{ env.PLUGIN_DIR }}
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PLUGIN_UUID }}-${{ steps.version.outputs.version }}
+          path: "*.streamDeckPlugin"
+          if-no-files-found: error
+
+      # Generate release notes for this tag only
+      - name: Generate release notes
+        id: release_notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.version.outputs.version }}"
+          tag_name: ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          files: "*.streamDeckPlugin"

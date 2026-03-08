@@ -1,0 +1,119 @@
+{
+    "version": "2.0.0",
+    "inputs": [
+        {
+            "id": "pluginName",
+            "description": "Plugin name (lowercase, no spaces — e.g. 'my-plugin')",
+            "type": "promptString",
+            "default": ""
+        },
+        {
+            "id": "releaseLevel",
+            "description": "Release level",
+            "type": "pickString",
+            "options": [
+                "patch",
+                "minor",
+                "major"
+            ],
+            "default": "patch"
+        }
+    ],
+    "tasks": [
+        {
+            "label": "Initial Setup",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/scripts/setup.ps1",
+                "-PluginName",
+                "${input:pluginName}"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true
+            }
+        },
+        {
+            "label": "Release",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-NoProfile",
+                "-Command",
+                "$level = '${input:releaseLevel}'; Write-Host \"▶ Releasing ($level)...\" -ForegroundColor Cyan; Write-Host '▶ Checking for uncommitted changes...' -ForegroundColor Yellow; $status = git status --porcelain; if ($status) { Write-Error \"Working tree is dirty. Commit or stash changes first.\"; exit 1 }; Write-Host '▶ Preview: upcoming changelog' -ForegroundColor Yellow; git-cliff --unreleased --strip header; Write-Host ''; Write-Host \"▶ Running cargo release $level --execute\" -ForegroundColor Yellow; cargo release $level --execute; Write-Host '✓ Release complete! GitHub Actions will build and publish.' -ForegroundColor Green"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": true
+            }
+        },
+        {
+            "type": "cargo",
+            "command": "build",
+            "args": [
+                "--release"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "build",
+            "label": "rust: cargo build"
+        },
+        {
+            "type": "process",
+            "command": "streamdeck",
+            "args": [
+                "stop",
+                "icu.veelume.starcitizen"
+            ],
+            "problemMatcher": [],
+            "label": "streamdeck: stop",
+            "hide": true
+        },
+        {
+            "type": "process",
+            "command": "streamdeck",
+            "args": [
+                "restart",
+                "icu.veelume.starcitizen"
+            ],
+            "problemMatcher": [],
+            "label": "streamdeck: restart",
+            "hide": true
+        },
+        {
+            "type": "shell",
+            "command": "Copy-Item",
+            "args": [
+                "${workspaceFolder}/target/release/streamdeck-starcitizen.exe",
+                "${workspaceFolder}/icu.veelume.starcitizen.sdPlugin/bin/icu.veelume.starcitizen.exe"
+            ],
+            "problemMatcher": [],
+            "label": "copy to plugin directory",
+            "hide": true
+        },
+        {
+            "label": "Build Plugin",
+            "dependsOn": [
+                "streamdeck: stop",
+                "rust: cargo build",
+                "copy to plugin directory",
+                "streamdeck: restart"
+            ],
+            "dependsOrder": "sequence",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}

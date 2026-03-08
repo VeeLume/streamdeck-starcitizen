@@ -1,0 +1,15 @@
+# cargo-release configuration
+# https://github.com/crate-ci/cargo-release
+
+# don't publish to crates.io
+publish = false
+# create tags like v1.2.3
+tag-name = "v{{version}}"
+# push commits and tags by default
+push = true
+# commit message (exempt from conventional commit hook via "chore(release)")
+pre-release-commit-message = "chore(release): {{version}}"
+
+# Generate CHANGELOG.md before the release commit
+pre-release-replacements = []
+pre-release-hook = ["git-cliff", "--output", "CHANGELOG.md", "--tag", "v{{version}}"]
