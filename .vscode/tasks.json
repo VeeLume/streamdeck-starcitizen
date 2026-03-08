@@ -94,12 +94,25 @@
             "type": "shell",
             "command": "Copy-Item",
             "args": [
-                "${workspaceFolder}/target/release/streamdeck-starcitizen.exe",
+                "${workspaceFolder}/target/release/plugin.exe",
                 "${workspaceFolder}/icu.veelume.starcitizen.sdPlugin/bin/icu.veelume.starcitizen.exe"
             ],
             "problemMatcher": [],
             "label": "copy to plugin directory",
             "hide": true
+        },
+        {
+            "label": "Extract P4K Data",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--release",
+                "--bin",
+                "extract-p4k"
+            ],
+            "group": "build",
+            "problemMatcher": []
         },
         {
             "label": "Build Plugin",

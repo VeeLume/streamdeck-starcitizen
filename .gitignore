@@ -1,4 +1,5 @@
 /target
+/p4k-extracted
 icu.veelume.starcitizen.sdPlugin/bin/*.exe
 .claude/settings.local.json
 .vscode/settings.json
