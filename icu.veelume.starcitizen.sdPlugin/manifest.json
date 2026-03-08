@@ -1,11 +1,11 @@
 {
     "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
     "UUID": "icu.veelume.starcitizen",
-    "Name": "starcitizen",
+    "Name": "Star Citizen Tools",
     "CodePath": "bin/icu.veelume.starcitizen.exe",
     "Author": "Veelume",
     "Version": "0.1.0.0",
-    "Description": "Stream Deck plugin for starcitizen",
+    "Description": "Bridge Star Citizen keybindings with Stream Deck hardware",
     "Icon": "images/plugin",
     "OS": [
         {
@@ -17,24 +17,76 @@
     "Software": {
         "MinimumVersion": "7.1"
     },
-    "Category": "starcitizen",
+    "Category": "Star Citizen",
     "CategoryIcon": "images/category",
+    "ApplicationsToMonitor": {
+        "windows": [
+            "StarCitizen.exe"
+        ]
+    },
     "Actions": [
         {
-            "UUID": "icu.veelume.starcitizen.example",
-            "Name": "Example Action",
-            "Icon": "images/example",
-            "Tooltip": "An example action",
-            "PropertyInspectorPath": "pi/example.html",
+            "UUID": "icu.veelume.starcitizen.manage-version",
+            "Name": "Manage Version",
+            "Icon": "images/manage-version",
+            "Tooltip": "Display and manage which Star Citizen installation is active",
+            "PropertyInspectorPath": "pi/manage-version.html",
+            "SupportedInMultiActions": true,
+            "Controllers": [
+                "Keypad",
+                "Encoder"
+            ],
+            "States": [
+                {
+                    "Image": "images/starting/manage-version"
+                }
+            ]
+        },
+        {
+            "UUID": "icu.veelume.starcitizen.execute-action",
+            "Name": "Execute Action",
+            "Icon": "images/execute-action",
+            "Tooltip": "Execute a Star Citizen keybind from a Stream Deck button",
+            "PropertyInspectorPath": "pi/execute-action.html",
+            "SupportedInMultiActions": true,
             "Controllers": [
                 "Keypad"
             ],
             "States": [
                 {
-                    "Image": "images/example",
-                    "TitleAlignment": "middle",
-                    "FontSize": 12,
-                    "FontFamily": "Arial"
+                    "Image": "images/starting/execute-action"
+                }
+            ]
+        },
+        {
+            "UUID": "icu.veelume.starcitizen.settings",
+            "Name": "Settings",
+            "Icon": "images/settings",
+            "Tooltip": "Plugin-wide configuration and installation refresh",
+            "PropertyInspectorPath": "pi/settings.html",
+            "SupportedInMultiActions": false,
+            "Controllers": [
+                "Keypad"
+            ],
+            "States": [
+                {
+                    "Image": "images/starting/settings"
+                }
+            ]
+        },
+        {
+            "UUID": "icu.veelume.starcitizen.generate-binds",
+            "Name": "Generate Binds",
+            "Icon": "images/generate-binds",
+            "Tooltip": "Generate missing keyboard bindings and export to XML",
+            "PropertyInspectorPath": "pi/generate-binds.html",
+            "SupportedInMultiActions": false,
+            "Controllers": [
+                "Keypad"
+            ],
+            "States": [
+                {
+                    "Image": "images/starting/generate-binds"
                 }
             ]
         }
