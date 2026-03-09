@@ -6,6 +6,7 @@ use streamdeck_lib::{incoming::*, prelude::*};
 use tracing::{debug, warn};
 
 use crate::PLUGIN_ID;
+use crate::bindings::HIDDEN_ACTION_MAPS;
 use crate::bindings::executor::binding_to_combo;
 use crate::bindings::model::{Binding, Device, GameAction, ParsedBindings};
 use crate::render;
@@ -625,6 +626,7 @@ impl ExecuteAction {
             bindings
                 .action_maps
                 .iter()
+                .filter(|m| !HIDDEN_ACTION_MAPS.contains(&m.name.as_ref()))
                 .filter(|m| {
                     // Deduplicate by UI label (maps with same label are grouped)
                     seen.insert(m.ui_label.as_ref().to_string())

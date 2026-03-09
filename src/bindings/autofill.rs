@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use tracing::debug;
+use tracing::{info, warn};
 
-use super::model::{Device, ParsedBindings};
+use super::model::{Binding, Device, ParsedBindings};
+use super::overlay::UserOverride;
 
 // ── Configuration ───────────────────────────────────────────────────────────────
 
@@ -33,7 +34,10 @@ impl Default for AutofillConfig {
             candidate_keys: default_candidate_keys(),
             candidate_modifiers: default_candidate_modifiers(),
             deny_combos: default_deny_combos(),
-            skip_maps: HashSet::new(),
+            skip_maps: super::HIDDEN_ACTION_MAPS
+                .iter()
+                .map(|&s| s.to_string())
+                .collect(),
             category_groups: default_category_groups(),
             auto_detect_deny_modifiers: true,
             profile_name: "icu-veelume-starcitizen".to_string(),
@@ -43,12 +47,55 @@ impl Default for AutofillConfig {
 
 fn default_candidate_keys() -> Vec<String> {
     let mut keys = Vec::new();
+    // F-keys
     for i in 1..=12 {
         keys.push(format!("f{i}"));
     }
+    // Numpad digits (SC canonical: np_0..np_9)
     for i in 0..=9 {
-        keys.push(format!("numpad_{i}"));
+        keys.push(format!("np_{i}"));
     }
+    // Numpad operators
+    keys.extend(
+        [
+            "np_add",
+            "np_subtract",
+            "np_multiply",
+            "np_divide",
+            "np_period",
+        ]
+        .iter()
+        .map(|&s| s.to_string()),
+    );
+    // Navigation block
+    keys.extend(
+        ["insert", "delete", "home", "end", "pgup", "pgdn"]
+            .iter()
+            .map(|&s| s.to_string()),
+    );
+    // Punctuation / symbol keys
+    keys.extend(
+        [
+            "minus",
+            "equals",
+            "semicolon",
+            "apostrophe",
+            "lbracket",
+            "rbracket",
+            "backslash",
+            "comma",
+            "period",
+            "slash",
+        ]
+        .iter()
+        .map(|&s| s.to_string()),
+    );
+    // Arrow keys
+    keys.extend(
+        ["up", "down", "left", "right"]
+            .iter()
+            .map(|&s| s.to_string()),
+    );
     keys
 }
 
@@ -66,7 +113,11 @@ fn default_candidate_modifiers() -> Vec<String> {
 fn default_deny_combos() -> HashSet<String> {
     let mut set = HashSet::new();
     set.insert("lalt+f4".into()); // Windows close
-    set.insert("lctrl+lalt+numpad_0".into()); // Common system shortcut
+    set.insert("lctrl+lalt+np_0".into()); // Common system shortcut
+    set.insert("lctrl+lalt+delete".into()); // Windows security screen
+    set.insert("lctrl+insert".into()); // System copy
+    set.insert("lshift+insert".into()); // System paste
+    set.insert("lshift+delete".into()); // System cut
     set
 }
 
@@ -118,6 +169,20 @@ pub struct GeneratedBinding {
     pub modifiers: Vec<String>,
 }
 
+/// A skipped action that could not be assigned a key combo.
+#[derive(Debug, Clone)]
+pub struct SkippedAction {
+    pub action_map: String,
+    pub action_name: String,
+}
+
+/// Result of the autofill generation.
+#[derive(Debug, Clone)]
+pub struct AutofillResult {
+    pub generated: Vec<GeneratedBinding>,
+    pub skipped: Vec<SkippedAction>,
+}
+
 impl GeneratedBinding {
     pub fn combo_key(&self) -> String {
         let mut parts = self.modifiers.clone();
@@ -129,10 +194,7 @@ impl GeneratedBinding {
 // ── Generator ───────────────────────────────────────────────────────────────────
 
 /// Generate conflict-free keyboard bindings for actions that lack them.
-pub fn generate_bindings(
-    bindings: &ParsedBindings,
-    config: &AutofillConfig,
-) -> Vec<GeneratedBinding> {
+pub fn generate_bindings(bindings: &ParsedBindings, config: &AutofillConfig) -> AutofillResult {
     // Step 1: Build the group index — which group does each map belong to?
     let group_for_category = build_group_index(&config.category_groups);
     let mut next_group_idx = config.category_groups.len();
@@ -192,6 +254,7 @@ pub fn generate_bindings(
 
     // Step 4: For each unbound action, assign a key combo
     let mut generated = Vec::new();
+    let mut skipped = Vec::new();
 
     for map in &bindings.action_maps {
         if config.skip_maps.contains(map.name.as_ref()) {
@@ -239,20 +302,45 @@ pub fn generate_bindings(
                 }
                 generated.push(binding);
             } else {
-                debug!(
+                warn!(
+                    action_map = map.name.as_ref(),
                     action = action.name.as_ref(),
-                    "No available combo for action"
+                    "Exhausted all combos — could not assign binding"
                 );
+                skipped.push(SkippedAction {
+                    action_map: map.name.to_string(),
+                    action_name: action.name.to_string(),
+                });
             }
         }
     }
 
-    debug!("Generated {} autofill bindings", generated.len());
-    generated
+    if skipped.is_empty() {
+        info!(
+            "Generated {} autofill bindings (all actions covered)",
+            generated.len()
+        );
+    } else {
+        warn!(
+            "Generated {} autofill bindings, {} actions skipped (out of combos)",
+            generated.len(),
+            skipped.len()
+        );
+    }
+
+    AutofillResult { generated, skipped }
 }
 
 /// Render generated bindings as a valid Star Citizen ActionMaps XML.
-pub fn render_xml(generated: &[GeneratedBinding], profile_name: &str) -> String {
+///
+/// `user_overrides` are the user's own customisations from `actionmaps.xml`.
+/// Including them in the generated profile prevents SC from resetting user
+/// rebinds when the profile is imported.
+pub fn render_xml(
+    generated: &[GeneratedBinding],
+    user_overrides: &[UserOverride],
+    profile_name: &str,
+) -> String {
     let mut xml = String::new();
     writeln!(xml, "<?xml version=\"1.0\" encoding=\"utf-8\"?>").unwrap();
     writeln!(
@@ -261,28 +349,134 @@ pub fn render_xml(generated: &[GeneratedBinding], profile_name: &str) -> String 
     )
     .unwrap();
 
-    // Group by action map
-    let mut by_map: HashMap<&str, Vec<&GeneratedBinding>> = HashMap::new();
-    for b in generated {
-        by_map.entry(&b.action_map).or_default().push(b);
+    // CustomisationUIHeader is required for SC to recognise the profile
+    writeln!(
+        xml,
+        "  <CustomisationUIHeader label=\"{profile_name}\" description=\"\" image=\"\">"
+    )
+    .unwrap();
+    writeln!(xml, "    <devices>").unwrap();
+    writeln!(xml, "      <keyboard instance=\"1\"/>").unwrap();
+    writeln!(xml, "      <mouse instance=\"1\"/>").unwrap();
+    writeln!(xml, "    </devices>").unwrap();
+    writeln!(xml, "  </CustomisationUIHeader>").unwrap();
+    writeln!(xml, "  <modifiers/>").unwrap();
+
+    // Collect all actions per map: user overrides first, then generated.
+    // Use an ordered map to keep action maps in a stable order.
+    let mut by_map: HashMap<String, Vec<ActionEntry>> = HashMap::new();
+    // Track which (map, action) pairs came from user overrides so generated
+    // bindings don't duplicate them.
+    let mut user_actions: HashSet<(String, String)> = HashSet::new();
+
+    for ovr in user_overrides {
+        user_actions.insert((ovr.action_map.clone(), ovr.action_name.clone()));
+        by_map
+            .entry(ovr.action_map.clone())
+            .or_default()
+            .push(ActionEntry::UserOverride(ovr));
     }
 
-    for (map_name, bindings) in &by_map {
+    for b in generated {
+        // Skip if this action already has a user override (user takes precedence)
+        if user_actions.contains(&(b.action_map.clone(), b.action_name.clone())) {
+            continue;
+        }
+        by_map
+            .entry(b.action_map.clone())
+            .or_default()
+            .push(ActionEntry::Generated(b));
+    }
+
+    // Sort map names for deterministic output
+    let mut map_names: Vec<&String> = by_map.keys().collect();
+    map_names.sort();
+
+    for map_name in map_names {
+        let entries = &by_map[map_name];
         writeln!(xml, "  <actionmap name=\"{map_name}\">").unwrap();
-        for b in bindings {
-            let input = format_input(&b.key, &b.modifiers);
-            writeln!(
-                xml,
-                "    <action name=\"{}\"><rebind input=\"{input}\"/></action>",
-                b.action_name
-            )
-            .unwrap();
+        for entry in entries {
+            match entry {
+                ActionEntry::Generated(b) => {
+                    let input = format_input(&b.key, &b.modifiers);
+                    writeln!(
+                        xml,
+                        "    <action name=\"{name}\">\n      <rebind device=\"keyboard\" activationMode=\"press\" input=\"{input}\"/>\n    </action>",
+                        name = b.action_name
+                    )
+                    .unwrap();
+                }
+                ActionEntry::UserOverride(ovr) => {
+                    writeln!(xml, "    <action name=\"{}\">", ovr.action_name).unwrap();
+                    for binding in &ovr.bindings {
+                        let input = format_user_rebind(binding);
+                        writeln!(
+                            xml,
+                            "      <rebind device=\"{device}\" input=\"{input}\"/>",
+                            device = device_name(binding.device),
+                        )
+                        .unwrap();
+                    }
+                    // Emit explicit clears so SC doesn't restore defaults
+                    for &device in &ovr.cleared_devices {
+                        writeln!(
+                            xml,
+                            "      <rebind device=\"{device}\" input=\"{prefix} \"/>",
+                            device = device_name(device),
+                            prefix = device_prefix(device),
+                        )
+                        .unwrap();
+                    }
+                    writeln!(xml, "    </action>").unwrap();
+                }
+            }
         }
         writeln!(xml, "  </actionmap>").unwrap();
     }
 
     writeln!(xml, "</ActionMaps>").unwrap();
     xml
+}
+
+enum ActionEntry<'a> {
+    Generated(&'a GeneratedBinding),
+    UserOverride(&'a UserOverride),
+}
+
+/// Format a user binding back into SC's rebind input string (e.g. `kb1_lalt+f4`).
+fn format_user_rebind(binding: &Binding) -> String {
+    let prefix = device_prefix(binding.device);
+    let key = binding.input.split('+').last().unwrap_or(&binding.input);
+    if binding.modifiers.is_empty() {
+        format!("{prefix}{key}")
+    } else {
+        // Only the first element gets the device prefix
+        let mut parts = Vec::with_capacity(binding.modifiers.len() + 1);
+        parts.push(format!("{prefix}{}", binding.modifiers[0]));
+        for m in &binding.modifiers[1..] {
+            parts.push(m.clone());
+        }
+        parts.push(key.to_string());
+        parts.join("+")
+    }
+}
+
+fn device_prefix(device: Device) -> &'static str {
+    match device {
+        Device::Keyboard => "kb1_",
+        Device::Mouse => "mo1_",
+        Device::Gamepad => "gp1_",
+        Device::Joystick => "js1_",
+    }
+}
+
+fn device_name(device: Device) -> &'static str {
+    match device {
+        Device::Keyboard => "keyboard",
+        Device::Mouse => "mouse",
+        Device::Gamepad => "gamepad",
+        Device::Joystick => "joystick",
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -351,27 +545,39 @@ fn format_combo(key: &str, modifiers: &[String]) -> String {
 }
 
 fn format_input(key: &str, modifiers: &[String]) -> String {
-    // SC format: "kb1_key" with modifiers as separate keys
-    // For generated bindings, we use the kb1_ prefix
+    // SC rebind format: only the FIRST element gets the device prefix.
+    // e.g. "kb1_rctrl+ralt+f2", NOT "kb1_rctrl+kb1_ralt+kb1_f2"
     if modifiers.is_empty() {
         format!("kb1_{key}")
     } else {
-        // SC supports modifier notation in rebind input
-        let mod_str: Vec<String> = modifiers.iter().map(|m| format!("kb1_{m}")).collect();
-        format!("{}+kb1_{key}", mod_str.join("+"))
+        let mut parts = Vec::with_capacity(modifiers.len() + 1);
+        parts.push(format!("kb1_{}", modifiers[0]));
+        for m in &modifiers[1..] {
+            parts.push(m.clone());
+        }
+        parts.push(key.to_string());
+        parts.join("+")
     }
 }
 
-fn strip_kb_prefix(input: &str) -> &str {
-    if let Some(rest) = input.strip_prefix("keyboard+") {
-        return rest;
-    }
-    if input.starts_with("kb")
+/// Strip device prefix and normalise numpad key names to SC canonical `np_` form.
+fn strip_kb_prefix(input: &str) -> String {
+    let raw = if let Some(rest) = input.strip_prefix("keyboard+") {
+        rest
+    } else if input.starts_with("kb")
         && let Some(pos) = input.find('_')
     {
-        return &input[pos + 1..];
+        &input[pos + 1..]
+    } else {
+        input
+    };
+
+    // Normalise numpad_X → np_X to match SC's keybinding_localization.xml
+    if let Some(suffix) = raw.strip_prefix("numpad_") {
+        format!("np_{suffix}")
+    } else {
+        raw.to_string()
     }
-    input
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -482,14 +688,21 @@ mod tests {
     fn generates_bindings_for_unbound_actions() {
         let bindings = make_test_bindings();
         let config = AutofillConfig::default();
-        let generated = generate_bindings(&bindings, &config);
+        let result = generate_bindings(&bindings, &config);
 
-        assert!(!generated.is_empty());
+        assert!(!result.generated.is_empty());
+        assert!(result.skipped.is_empty());
         // v_power_toggle already has kb1_f, should not be generated
-        assert!(generated.iter().all(|g| g.action_name != "v_power_toggle"));
+        assert!(
+            result
+                .generated
+                .iter()
+                .all(|g| g.action_name != "v_power_toggle")
+        );
         // v_unbound_action should get a binding
         assert!(
-            generated
+            result
+                .generated
                 .iter()
                 .any(|g| g.action_name == "v_unbound_action")
         );
@@ -499,11 +712,11 @@ mod tests {
     fn no_conflicts_within_same_map() {
         let bindings = make_test_bindings();
         let config = AutofillConfig::default();
-        let generated = generate_bindings(&bindings, &config);
+        let result = generate_bindings(&bindings, &config);
 
         // Combos within the same action map must be unique
         let mut by_map: HashMap<&str, HashSet<String>> = HashMap::new();
-        for g in &generated {
+        for g in &result.generated {
             let combo = g.combo_key();
             let set = by_map.entry(&g.action_map).or_default();
             assert!(
@@ -518,12 +731,17 @@ mod tests {
     fn renders_valid_xml() {
         let bindings = make_test_bindings();
         let config = AutofillConfig::default();
-        let generated = generate_bindings(&bindings, &config);
-        let xml = render_xml(&generated, "test-profile");
+        let result = generate_bindings(&bindings, &config);
+        let xml = render_xml(&result.generated, &[], "test-profile");
 
         assert!(xml.contains("<?xml"));
         assert!(xml.contains("<ActionMaps"));
         assert!(xml.contains("profileName=\"test-profile\""));
+        assert!(xml.contains("<CustomisationUIHeader"));
+        assert!(xml.contains("<keyboard instance=\"1\"/>"));
+        assert!(xml.contains("<modifiers/>"));
+        assert!(xml.contains("device=\"keyboard\""));
+        assert!(xml.contains("activationMode=\"press\""));
         assert!(xml.contains("</ActionMaps>"));
     }
 
@@ -533,5 +751,237 @@ mod tests {
         let combos = generate_modifier_combos(&mods);
         assert_eq!(combos.len(), 4); // 2^2 = 4
         assert!(combos[0].is_empty()); // no modifiers first
+    }
+
+    #[test]
+    fn strip_kb_prefix_normalises_numpad() {
+        assert_eq!(strip_kb_prefix("kb1_numpad_8"), "np_8");
+        assert_eq!(strip_kb_prefix("kb1_np_8"), "np_8");
+        assert_eq!(strip_kb_prefix("kb1_numpad_add"), "np_add");
+        assert_eq!(strip_kb_prefix("kb1_np_add"), "np_add");
+        assert_eq!(strip_kb_prefix("kb1_f1"), "f1");
+        assert_eq!(strip_kb_prefix("kb1_insert"), "insert");
+        assert_eq!(strip_kb_prefix("keyboard+lshift"), "lshift");
+    }
+
+    /// Validate that all generated key names are recognised by SC's
+    /// `keybinding_localization.xml`. This catches naming mismatches
+    /// (e.g. `numpad_8` vs `np_8`) before they ship.
+    #[test]
+    fn generated_keys_match_sc_localization() {
+        let loc_path = "p4k-extracted/Data/Libs/Config/keybinding_localization.xml";
+        if !std::path::Path::new(loc_path).exists() {
+            eprintln!("Skipping: {loc_path} not found (run extract-p4k first)");
+            return;
+        }
+
+        // Parse valid key names from keybinding_localization.xml
+        let xml = std::fs::read_to_string(loc_path).unwrap();
+        let doc = roxmltree::Document::parse(&xml).unwrap();
+        let mut valid_keys: HashSet<String> = HashSet::new();
+        for device in doc.root_element().children().filter(|n| n.is_element()) {
+            let device_name = device.attribute("name").unwrap_or("");
+            if device_name != "keyboard" {
+                continue;
+            }
+            for key_node in device.children().filter(|n| n.is_element()) {
+                if let Some(name) = key_node.attribute("name") {
+                    valid_keys.insert(name.to_string());
+                }
+            }
+        }
+
+        assert!(
+            valid_keys.len() > 50,
+            "Too few keys parsed from localization: {}",
+            valid_keys.len()
+        );
+
+        // Generate bindings from real data
+        let profile_path = "p4k-extracted/Data/Libs/Config/defaultProfile.xml";
+        if !std::path::Path::new(profile_path).exists() {
+            eprintln!("Skipping: {profile_path} not found");
+            return;
+        }
+        let profile_xml = std::fs::read_to_string(profile_path).unwrap();
+        let translations = crate::bindings::translations::Translations::default();
+        let parsed =
+            crate::bindings::parser::parse_default_profile(&profile_xml, &translations).unwrap();
+
+        let config = AutofillConfig::default();
+        let result = generate_bindings(&parsed, &config);
+
+        assert!(
+            !result.generated.is_empty(),
+            "No bindings generated — nothing to validate"
+        );
+
+        // Validate every generated key and modifier is in the localization file
+        let mut unknown = Vec::new();
+        for g in &result.generated {
+            if !valid_keys.contains(&g.key) {
+                unknown.push(format!("key={} (action={})", g.key, g.action_name));
+            }
+            for m in &g.modifiers {
+                if !valid_keys.contains(m) {
+                    unknown.push(format!("modifier={m} (action={})", g.action_name));
+                }
+            }
+        }
+
+        if !unknown.is_empty() {
+            unknown.sort();
+            unknown.dedup();
+            panic!(
+                "{} generated key name(s) not in SC keybinding_localization.xml:\n  {}",
+                unknown.len(),
+                unknown.join("\n  ")
+            );
+        }
+
+        eprintln!(
+            "Validated {} generated bindings — all keys match SC localization",
+            result.generated.len()
+        );
+    }
+
+    #[test]
+    fn render_xml_preserves_user_overrides() {
+        use super::super::model::Binding;
+        use super::super::overlay::UserOverride;
+
+        // One generated binding
+        let generated = vec![GeneratedBinding {
+            action_map: "spaceship_general".into(),
+            action_name: "v_autoland".into(),
+            key: "f5".into(),
+            modifiers: vec![],
+        }];
+
+        // Two user overrides: a mouse rebind and a keyboard rebind
+        let user_overrides = vec![
+            UserOverride {
+                action_map: "seat_general".into(),
+                action_name: "v_view_look_behind".into(),
+                bindings: vec![Binding {
+                    device: Device::Mouse,
+                    input: "mouse+mouse4".into(),
+                    modifiers: vec![],
+                }],
+                cleared_devices: vec![],
+            },
+            UserOverride {
+                action_map: "seat_general".into(),
+                action_name: "v_toggle_missile_mode".into(),
+                bindings: vec![Binding {
+                    device: Device::Keyboard,
+                    input: "keyboard+g".into(),
+                    modifiers: vec![],
+                }],
+                cleared_devices: vec![],
+            },
+        ];
+
+        let xml = render_xml(&generated, &user_overrides, "test-profile");
+
+        // Generated binding present
+        assert!(xml.contains("v_autoland"), "generated action missing");
+        assert!(xml.contains("kb1_f5"), "generated key combo missing");
+
+        // User overrides present
+        assert!(
+            xml.contains("v_view_look_behind"),
+            "user mouse rebind missing"
+        );
+        assert!(xml.contains("mo1_mouse4"), "mouse input missing");
+        assert!(
+            xml.contains("v_toggle_missile_mode"),
+            "user keyboard rebind missing"
+        );
+        assert!(xml.contains("kb1_g"), "keyboard input missing");
+
+        // Both action maps present
+        assert!(xml.contains("spaceship_general"));
+        assert!(xml.contains("seat_general"));
+    }
+
+    #[test]
+    fn render_xml_user_override_takes_precedence_over_generated() {
+        use super::super::model::Binding;
+        use super::super::overlay::UserOverride;
+
+        // Generated binding for an action
+        let generated = vec![GeneratedBinding {
+            action_map: "seat_general".into(),
+            action_name: "v_toggle_missile_mode".into(),
+            key: "f5".into(),
+            modifiers: vec!["lctrl".into()],
+        }];
+
+        // User also has a binding for the same action
+        let user_overrides = vec![UserOverride {
+            action_map: "seat_general".into(),
+            action_name: "v_toggle_missile_mode".into(),
+            bindings: vec![Binding {
+                device: Device::Keyboard,
+                input: "keyboard+g".into(),
+                modifiers: vec![],
+            }],
+            cleared_devices: vec![],
+        }];
+
+        let xml = render_xml(&generated, &user_overrides, "test-profile");
+
+        // User's binding wins
+        assert!(xml.contains("kb1_g"), "user binding should win");
+        // Generated binding should NOT be present
+        assert!(
+            !xml.contains("kb1_f5"),
+            "generated binding should be suppressed when user override exists"
+        );
+    }
+
+    #[test]
+    fn render_xml_preserves_cleared_bindings() {
+        use super::super::overlay::UserOverride;
+
+        let generated = vec![];
+
+        // User cleared a keyboard binding (SC writes "kb1_ ")
+        let user_overrides = vec![UserOverride {
+            action_map: "seat_general".into(),
+            action_name: "v_emergency_exit".into(),
+            bindings: vec![],
+            cleared_devices: vec![Device::Keyboard],
+        }];
+
+        let xml = render_xml(&generated, &user_overrides, "test-profile");
+
+        assert!(xml.contains("v_emergency_exit"), "cleared action missing");
+        assert!(
+            xml.contains("kb1_ "),
+            "clear marker missing — SC needs 'kb1_ ' to suppress the default"
+        );
+    }
+
+    #[test]
+    fn format_input_device_prefix_only_on_first_element() {
+        // No modifiers
+        assert_eq!(format_input("f5", &[]), "kb1_f5");
+
+        // Single modifier
+        assert_eq!(format_input("end", &["rctrl".into()]), "kb1_rctrl+end");
+
+        // Two modifiers — only the first gets kb1_
+        assert_eq!(
+            format_input("end", &["rctrl".into(), "ralt".into()]),
+            "kb1_rctrl+ralt+end"
+        );
+
+        // Three modifiers
+        assert_eq!(
+            format_input("f1", &["lctrl".into(), "lalt".into(), "lshift".into()]),
+            "kb1_lctrl+lalt+lshift+f1"
+        );
     }
 }

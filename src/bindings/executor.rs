@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use streamdeck_lib::input::{Action, InputCombo, Key, MouseButton, ScrollDirection};
+use streamdeck_lib::input::{Action, InputCombo, Key, Modifiers, MouseButton, ScrollDirection};
 use tracing::{debug, warn};
 
 use super::model::{ActivationBehavior, ActivationMode, Binding, Device, GameAction};
@@ -31,6 +31,20 @@ pub fn binding_to_combo(
         Action::Mouse(button) => InputCombo::mouse(button),
         Action::Scroll(direction, amount) => InputCombo::scroll(direction, amount),
     };
+
+    // Map modifier keys and apply them to the combo
+    let mut mods = Modifiers::empty();
+    for modifier in &binding.modifiers {
+        let mod_name = strip_device_prefix(modifier);
+        if let Some(m) = sc_name_to_modifier(mod_name) {
+            mods |= m;
+        } else {
+            warn!(modifier = mod_name, "Unknown SC modifier name");
+        }
+    }
+    if !mods.is_empty() {
+        combo = combo.also(mods);
+    }
 
     // Apply hold duration from the activation mode if it's a "hold" type
     if let Some(mode_name) = &action.activation_mode
@@ -216,6 +230,20 @@ fn sc_key_to_key(name: &str) -> Option<Key> {
     }
 }
 
+/// Map a Star Citizen modifier key name to a `Modifiers` flag.
+fn sc_name_to_modifier(name: &str) -> Option<Modifiers> {
+    let lower = name.to_lowercase();
+    match lower.as_str() {
+        "lctrl" => Some(Modifiers::CONTROL_LEFT),
+        "rctrl" => Some(Modifiers::CONTROL_RIGHT),
+        "lalt" => Some(Modifiers::ALT_LEFT),
+        "ralt" => Some(Modifiers::ALT_RIGHT),
+        "lshift" => Some(Modifiers::SHIFT_LEFT),
+        "rshift" => Some(Modifiers::SHIFT_RIGHT),
+        _ => None,
+    }
+}
+
 /// Map a Star Citizen mouse button name to `MouseButton`.
 ///
 /// SC uses `mouse1`/`mouse2`/`mouse3` in bindings. Also handles `button1` etc.
@@ -356,6 +384,49 @@ mod tests {
         let modes = HashMap::new();
 
         assert!(binding_to_combo(&binding, &modes, &action).is_none());
+    }
+
+    #[test]
+    fn binding_to_combo_includes_modifiers() {
+        // LAlt+F6 — should produce F6 with ALT_LEFT modifier
+        let binding = Binding {
+            device: Device::Keyboard,
+            input: "kb1_f6".to_string(),
+            modifiers: vec!["kb1_lalt".to_string()],
+        };
+        let action = GameAction {
+            name: "test".into(),
+            ui_label: "Test".into(),
+            bindings: vec![],
+            activation_mode: None,
+        };
+        let modes = HashMap::new();
+
+        let combo = binding_to_combo(&binding, &modes, &action).unwrap();
+        assert_eq!(combo.action, Action::Key(Key::F6));
+        assert!(combo.modifiers.contains(Modifiers::ALT_LEFT));
+    }
+
+    #[test]
+    fn binding_to_combo_multiple_modifiers() {
+        // RCtrl+RAlt+End
+        let binding = Binding {
+            device: Device::Keyboard,
+            input: "kb1_end".to_string(),
+            modifiers: vec!["kb1_rctrl".to_string(), "kb1_ralt".to_string()],
+        };
+        let action = GameAction {
+            name: "test".into(),
+            ui_label: "Test".into(),
+            bindings: vec![],
+            activation_mode: None,
+        };
+        let modes = HashMap::new();
+
+        let combo = binding_to_combo(&binding, &modes, &action).unwrap();
+        assert_eq!(combo.action, Action::Key(Key::End));
+        assert!(combo.modifiers.contains(Modifiers::CONTROL_RIGHT));
+        assert!(combo.modifiers.contains(Modifiers::ALT_RIGHT));
     }
 
     #[test]

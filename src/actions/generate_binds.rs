@@ -18,6 +18,7 @@ pub struct GenerateBindsAction {
     profile_name: String,
     output_path_override: String,
     last_generated_count: Option<usize>,
+    last_skipped_count: Option<usize>,
     key_style: String,
 }
 
@@ -76,8 +77,9 @@ impl Action for GenerateBindsAction {
         };
 
         // Generate bindings (includes both default + user bindings as occupied)
-        let generated = generate_bindings(bindings, &config);
-        let count = generated.len();
+        let result = generate_bindings(bindings, &config);
+        let count = result.generated.len();
+        let skipped = result.skipped.len();
 
         if count == 0 {
             info!("No unbound actions found — nothing to generate");
@@ -88,8 +90,23 @@ impl Action for GenerateBindsAction {
             return;
         }
 
-        // Render XML
-        let xml = render_xml(&generated, &config.profile_name);
+        if skipped > 0 {
+            warn!("{skipped} actions could not be assigned a key combo (ran out of slots)");
+            for s in &result.skipped {
+                warn!(
+                    action_map = s.action_map.as_str(),
+                    action = s.action_name.as_str(),
+                    "Skipped"
+                );
+            }
+        }
+
+        // Render XML (include user overrides to preserve their customisations)
+        let xml = render_xml(
+            &result.generated,
+            &snap.user_overrides,
+            &config.profile_name,
+        );
 
         // Resolve output path
         let output_dir = if !self.output_path_override.is_empty() {
@@ -121,7 +138,12 @@ impl Action for GenerateBindsAction {
             Ok(()) => {
                 info!("Generated {count} bindings → {}", output_path.display());
                 self.last_generated_count = Some(count);
-                cx.sd().show_ok(ev.context);
+                self.last_skipped_count = Some(skipped);
+                if skipped > 0 {
+                    cx.sd().show_alert(ev.context);
+                } else {
+                    cx.sd().show_ok(ev.context);
+                }
             }
             Err(e) => {
                 warn!("Failed to write {}: {e}", output_path.display());
@@ -145,6 +167,7 @@ impl Action for GenerateBindsAction {
         {
             // Reset generation count when bindings or installation changes
             self.last_generated_count = None;
+            self.last_skipped_count = None;
             self.render_status(cx, ctx_id);
         } else if event.downcast(topics::STYLE_CHANGED).is_some() {
             self.render_status(cx, ctx_id);
@@ -206,7 +229,11 @@ impl GenerateBindsAction {
             let snap = bindings_state.snapshot();
             if snap.bindings.is_some() {
                 if let Some(count) = self.last_generated_count {
-                    lines.push(format!("{count} binds"));
+                    if let Some(skipped) = self.last_skipped_count.filter(|&s| s > 0) {
+                        lines.push(format!("{count} binds\n{skipped} skipped!"));
+                    } else {
+                        lines.push(format!("{count} binds"));
+                    }
                 } else {
                     lines.push("Ready".to_string());
                 }
@@ -227,7 +254,7 @@ impl GenerateBindsAction {
             lines.join("\n")
         };
 
-        render::render_centered(cx, ctx_id, &text, &style);
+        render::render_multiline(cx, ctx_id, &text, &style);
     }
 }
 

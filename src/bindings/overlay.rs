@@ -10,6 +10,8 @@ pub struct UserOverride {
     pub action_map: String,
     pub action_name: String,
     pub bindings: Vec<Binding>,
+    /// Devices whose binding the user explicitly cleared (SC writes `kb1_ ` / `mo1_ `).
+    pub cleared_devices: Vec<Device>,
 }
 
 /// Parse the user's actionmaps.xml overlay file.
@@ -49,21 +51,25 @@ pub fn parse_user_overlay(xml: &str) -> Result<Vec<UserOverride>> {
             };
 
             let mut bindings = Vec::new();
+            let mut cleared_devices = Vec::new();
             for rebind in action_node.children().filter(|n| n.has_tag_name("rebind")) {
-                if let Some(input) = rebind.attribute("input")
-                    && !input.is_empty()
-                    && input != " "
-                    && let Some(binding) = parse_rebind_input(input)
-                {
-                    bindings.push(binding);
+                if let Some(input) = rebind.attribute("input") {
+                    // SC writes "kb1_ " (space as key) to clear a binding
+                    let key_part = strip_device_prefix(input).trim();
+                    if key_part.is_empty() {
+                        cleared_devices.push(detect_device_from_input(input));
+                    } else if let Some(binding) = parse_rebind_input(input) {
+                        bindings.push(binding);
+                    }
                 }
             }
 
-            if !bindings.is_empty() {
+            if !bindings.is_empty() || !cleared_devices.is_empty() {
                 overrides.push(UserOverride {
                     action_map: map_name.clone(),
                     action_name,
                     bindings,
+                    cleared_devices,
                 });
             }
         }
@@ -142,13 +148,19 @@ fn strip_device_prefix(input: &str) -> &str {
 
 /// Apply user overrides on top of the default bindings.
 ///
-/// For each override, find the matching action map and action, then replace its bindings.
+/// For each override, find the matching action map and action, then:
+/// - Replace bindings for devices that have a new binding
+/// - Remove bindings for devices the user explicitly cleared
 pub fn apply_overlay(bindings: &mut ParsedBindings, overrides: &[UserOverride]) {
     for ovr in overrides {
         for map in &mut bindings.action_maps {
             if map.name.as_ref() == ovr.action_map {
                 for action in &mut map.actions {
                     if action.name.as_ref() == ovr.action_name {
+                        // Remove bindings for cleared devices
+                        for &device in &ovr.cleared_devices {
+                            action.bindings.retain(|b| b.device != device);
+                        }
                         // Merge: add new device bindings, replace existing ones for same device
                         for new_bind in &ovr.bindings {
                             if let Some(existing) = action
@@ -320,6 +332,7 @@ mod tests {
                 input: "keyboard+g".to_string(),
                 modifiers: vec!["ralt".to_string()],
             }],
+            cleared_devices: vec![],
         }];
 
         apply_overlay(&mut bindings, &overrides);
@@ -327,5 +340,123 @@ mod tests {
         let action = &bindings.action_maps[0].actions[0];
         assert_eq!(action.bindings[0].input, "keyboard+g");
         assert_eq!(action.bindings[0].modifiers, vec!["ralt"]);
+    }
+
+    #[test]
+    fn parse_clear_binding_from_actionmaps_xml() {
+        // Real SC format when user clears a default binding
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<ActionMaps>
+ <ActionProfiles version="1" optionsVersion="2" rebindVersion="2" profileName="default">
+  <modifiers />
+  <actionmap name="seat_general">
+   <action name="v_emergency_exit">
+    <rebind input="kb1_ "/>
+   </action>
+  </actionmap>
+ </ActionProfiles>
+</ActionMaps>"#;
+
+        let overrides = parse_user_overlay(xml).unwrap();
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].action_name, "v_emergency_exit");
+        assert!(
+            overrides[0].bindings.is_empty(),
+            "cleared binding should not produce a Binding"
+        );
+        assert_eq!(overrides[0].cleared_devices, vec![Device::Keyboard]);
+    }
+
+    #[test]
+    fn apply_overlay_clears_binding() {
+        let mut bindings = ParsedBindings {
+            action_maps: vec![ActionMap {
+                name: Arc::from("seat_general"),
+                ui_label: Arc::from("Seat"),
+                ui_category: Arc::from("@ui_CCSeatGeneral"),
+                actions: vec![GameAction {
+                    name: Arc::from("v_emergency_exit"),
+                    ui_label: Arc::from("Emergency Exit"),
+                    bindings: vec![Binding {
+                        device: Device::Keyboard,
+                        input: "keyboard+u".to_string(),
+                        modifiers: vec!["lshift".to_string()],
+                    }],
+                    activation_mode: None,
+                }],
+            }],
+            activation_modes: Default::default(),
+        };
+
+        let overrides = vec![UserOverride {
+            action_map: "seat_general".to_string(),
+            action_name: "v_emergency_exit".to_string(),
+            bindings: vec![],
+            cleared_devices: vec![Device::Keyboard],
+        }];
+
+        apply_overlay(&mut bindings, &overrides);
+
+        let action = &bindings.action_maps[0].actions[0];
+        assert!(
+            action.bindings.is_empty(),
+            "keyboard binding should be removed after clear"
+        );
+    }
+
+    /// Parse the real multi-override example file and verify all override types
+    /// are handled: keyboard rebind, mouse rebind, keyboard clear, mouse clear.
+    #[test]
+    fn parse_multiple_rebinds_example_file() {
+        let xml = std::fs::read_to_string("examples/actionmaps-multiple-rebinds.xml").unwrap();
+        let overrides = parse_user_overlay(&xml).unwrap();
+
+        // 4 actions across 2 action maps
+        assert_eq!(
+            overrides.len(),
+            4,
+            "expected 4 overrides, got {}",
+            overrides.len()
+        );
+
+        // v_emergency_exit: keyboard clear
+        let exit = overrides
+            .iter()
+            .find(|o| o.action_name == "v_emergency_exit")
+            .unwrap();
+        assert_eq!(exit.action_map, "seat_general");
+        assert!(exit.bindings.is_empty());
+        assert_eq!(exit.cleared_devices, vec![Device::Keyboard]);
+
+        // v_ads_hold: keyboard rebind to S
+        let ads = overrides
+            .iter()
+            .find(|o| o.action_name == "v_ads_hold")
+            .unwrap();
+        assert_eq!(ads.action_map, "spaceship_view");
+        assert_eq!(ads.bindings.len(), 1);
+        assert_eq!(ads.bindings[0].device, Device::Keyboard);
+        assert_eq!(ads.bindings[0].input, "keyboard+s");
+        assert!(ads.cleared_devices.is_empty());
+
+        // v_view_dynamic_zoom_rel: mouse rebind to maxis_y
+        let zoom = overrides
+            .iter()
+            .find(|o| o.action_name == "v_view_dynamic_zoom_rel")
+            .unwrap();
+        assert_eq!(zoom.action_map, "spaceship_view");
+        assert_eq!(zoom.bindings.len(), 1);
+        assert_eq!(zoom.bindings[0].device, Device::Mouse);
+        assert_eq!(zoom.bindings[0].input, "mouse+maxis_y");
+        assert!(zoom.cleared_devices.is_empty());
+
+        // v_view_pitch_mouse: mouse clear
+        let pitch = overrides
+            .iter()
+            .find(|o| o.action_name == "v_view_pitch_mouse")
+            .unwrap();
+        assert_eq!(pitch.action_map, "spaceship_view");
+        assert!(pitch.bindings.is_empty());
+        assert_eq!(pitch.cleared_devices, vec![Device::Mouse]);
     }
 }

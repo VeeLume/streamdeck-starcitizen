@@ -202,17 +202,18 @@ pub fn reload_bindings(cx: &Context) {
 
     info!("Loading bindings from {}", path.display());
     match bindings::load_bindings(&path) {
-        Ok(parsed) => {
+        Ok(loaded) => {
             let channel = cx
                 .try_ext::<ActiveInstallationState>()
                 .and_then(|s| s.snapshot().current().map(|i| i.channel));
 
-            let map_count = parsed.map_count();
-            let action_count = parsed.action_count();
+            let map_count = loaded.bindings.map_count();
+            let action_count = loaded.bindings.action_count();
 
             if let Some(state) = cx.try_ext::<BindingsState>() {
                 state.replace(BindingsData {
-                    bindings: Some(parsed),
+                    bindings: Some(loaded.bindings),
+                    user_overrides: loaded.user_overrides,
                     channel,
                     error: None,
                 });
@@ -230,6 +231,7 @@ pub fn reload_bindings(cx: &Context) {
             if let Some(state) = cx.try_ext::<BindingsState>() {
                 state.replace(BindingsData {
                     bindings: None,
+                    user_overrides: Vec::new(),
                     channel: None,
                     error: Some(msg),
                 });

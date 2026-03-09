@@ -3,12 +3,16 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 
 use crate::bindings::model::ParsedBindings;
+use crate::bindings::overlay::UserOverride;
 use crate::discovery::Channel;
 
 /// Shared data for loaded keybindings.
 #[derive(Debug, Clone, Default)]
 pub struct BindingsData {
     pub bindings: Option<ParsedBindings>,
+    /// Raw user overrides from actionmaps.xml, preserved so the generated
+    /// profile can include them and avoid resetting user customisations.
+    pub user_overrides: Vec<UserOverride>,
     #[allow(dead_code)] // Tracks which channel's bindings are loaded; useful for PI status
     pub channel: Option<Channel>,
     #[allow(dead_code)] // Stores load error message; useful for PI status display

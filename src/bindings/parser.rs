@@ -585,16 +585,23 @@ mod tests {
 
         // ── Autofill pipeline ──
         let config = AutofillConfig::default();
-        let generated = generate_bindings(&parsed, &config);
+        let result = generate_bindings(&parsed, &config);
 
         eprintln!(
-            "Autofill: generated {} bindings for unbound actions",
-            generated.len()
+            "Autofill: generated {} bindings, {} skipped",
+            result.generated.len(),
+            result.skipped.len()
         );
+        if !result.skipped.is_empty() {
+            eprintln!("Skipped actions:");
+            for s in &result.skipped {
+                eprintln!("  {}.{}", s.action_map, s.action_name);
+            }
+        }
 
         // Verify no conflicts within the generated set
         let mut seen_per_group: HashMap<String, HashSet<String>> = HashMap::new();
-        for g in &generated {
+        for g in &result.generated {
             let combo = g.combo_key();
             let set = seen_per_group.entry(g.action_map.clone()).or_default();
             assert!(
@@ -605,7 +612,7 @@ mod tests {
         }
 
         // Render XML and validate basic structure
-        let xml_output = render_xml(&generated, &config.profile_name);
+        let xml_output = render_xml(&result.generated, &[], &config.profile_name);
         assert!(xml_output.contains("<?xml"));
         assert!(xml_output.contains("<ActionMaps"));
         assert!(xml_output.contains("</ActionMaps>"));
@@ -626,9 +633,10 @@ mod tests {
         let result = crate::bindings::load_bindings(live_path);
         assert!(result.is_ok(), "load_bindings failed: {:?}", result.err());
 
-        let parsed = result.unwrap();
+        let loaded = result.unwrap();
+        let parsed = &loaded.bindings;
         eprintln!(
-            "LIVE install: {} maps, {} actions, {} kb bindings",
+            "LIVE install: {} maps, {} actions, {} kb bindings, {} user overrides",
             parsed.map_count(),
             parsed.action_count(),
             parsed
@@ -637,7 +645,8 @@ mod tests {
                 .flat_map(|m| &m.actions)
                 .flat_map(|a| &a.bindings)
                 .filter(|b| b.device == Device::Keyboard)
-                .count()
+                .count(),
+            loaded.user_overrides.len()
         );
 
         assert!(parsed.map_count() > 10);
