@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-03-09
+
+### Bug Fixes
+
+- Apply clippy lints for let-chains and redundant closures
+
+Collapse nested `if let` / `if` into idiomatic let-chains and simplify
+    `.map(|b| format_binding_display(b))` to `.map(format_binding_display)`.
+- **bindings:** Preserve user overrides in generated profiles and simulate modifiers
+
+- Thread user overrides (rebinds + cleared bindings) through the full
+      pipeline so generated profiles no longer reset user customizations
+    - Detect and round-trip SC's clear binding format (kb1_ ) correctly
+    - Fix device prefix only applied to the first element in rebind format
+      (kb1_rctrl+ralt+end instead of kb1_rctrl+kb1_ralt+kb1_end)
+    - Simulate modifier keys (lalt, rctrl, etc.) when executing bindings
+      from Stream Deck, fixing combos like LAlt+F6 firing as just F6
+    - Add punctuation/symbol and arrow keys to autofill candidate pool
+    - Hide internal/debug action maps from PI dropdown and autofill
+    - Add HIDDEN_ACTION_MAPS shared constant and LoadedBindings struct
+
+### Documentation
+
+- Update project documentation to reflect current implementation
+
+- Rewrite README.md with actual features, project structure, and usage
+    - Update CLAUDE.md with complete dependency table, domain modules section,
+      and SC-specific project overview; remove premature workspace conversion
+    - Extract domain knowledge from Plugin-Spec.md into docs/star-citizen-domain.md
+      (SC keybinding system, installations, translations, glossary, open decisions)
+    - Delete Plugin-Spec.md (implementation complete, content redistributed)
 ## [0.1.1] - 2026-03-08
 
 ### Bug Fixes
