@@ -143,12 +143,22 @@ fn parse_game_action(node: &roxmltree::Node, translations: &Translations) -> Opt
     }
 
     // 2. Parse device-specific child overrides (e.g. <gamepad input="..."/>)
+    //    Also handles <inputdata> children inside device elements, e.g.:
+    //      <keyboard><inputdata input="enter"/></keyboard>
     for &(tag, device) in DEVICE_ATTRS {
         for child in node.children().filter(|n| n.has_tag_name(tag)) {
-            if let Some(value) = child.attribute("input")
-                && let Some(binding) = parse_attribute_binding(value, device, tag)
-            {
-                bindings.push(binding);
+            if let Some(value) = child.attribute("input") {
+                if let Some(binding) = parse_attribute_binding(value, device, tag) {
+                    bindings.push(binding);
+                }
+            } else {
+                for inputdata in child.children().filter(|n| n.has_tag_name("inputdata")) {
+                    if let Some(value) = inputdata.attribute("input")
+                        && let Some(binding) = parse_attribute_binding(value, device, tag)
+                    {
+                        bindings.push(binding);
+                    }
+                }
             }
         }
     }
@@ -411,6 +421,173 @@ mod tests {
             .find(|b| b.device == Device::Gamepad)
             .unwrap();
         assert_eq!(gp.input, "gamepad+dpad_up");
+    }
+
+    #[test]
+    fn parse_inputdata_children() {
+        // SC uses <inputdata> inside device child elements for some UI actions.
+        // Without parsing these, autofill overwrites default bindings like
+        // Enter→chat with generated combos (e.g. ralt+backslash).
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<profile version="1">
+  <actionmap name="common" UILabel="@ui_Common" UICategory="@ui_CGUIGeneral">
+    <action name="focus_on_chat_textinput" activationMode="press" joystick=" " gamepad=" ">
+      <keyboard>
+        <inputdata input="enter"/>
+        <inputdata input="np_enter"/>
+      </keyboard>
+    </action>
+  </actionmap>
+  <actionmap name="ui_textfield" version="1">
+    <action name="ui_textfield_enter" onPress="1" onRelease="1">
+      <keyboard>
+        <inputdata input="enter"/>
+        <inputdata input="np_enter"/>
+      </keyboard>
+    </action>
+  </actionmap>
+  <actionmap name="flashui" version="1">
+    <action name="flashui_return" onPress="1" onRelease="1" gamepad="a" joystick="button2">
+      <keyboard>
+        <inputdata input="enter"/>
+        <inputdata input="np_enter"/>
+      </keyboard>
+    </action>
+    <action name="flashui_mouse">
+      <mouse>
+        <inputdata input="mouse1"/>
+        <inputdata input="maxis_x"/>
+      </mouse>
+    </action>
+    <action name="ui_up" onPress="1" onHold="1" keyboard="up">
+      <gamepad>
+        <inputdata input="dpad_up"/>
+        <inputdata input="thumbr_up"/>
+      </gamepad>
+    </action>
+  </actionmap>
+</profile>"#;
+
+        let translations = Translations::default();
+        let result = parse_default_profile(xml, &translations).unwrap();
+
+        // focus_on_chat_textinput: keyboard bindings from <inputdata>
+        let chat = &result.action_maps[0].actions[0];
+        assert_eq!(chat.name.as_ref(), "focus_on_chat_textinput");
+        let kb: Vec<_> = chat
+            .bindings
+            .iter()
+            .filter(|b| b.device == Device::Keyboard)
+            .collect();
+        assert_eq!(kb.len(), 2, "expected enter + np_enter keyboard bindings");
+        assert_eq!(kb[0].input, "keyboard+enter");
+        assert_eq!(kb[1].input, "keyboard+np_enter");
+
+        // ui_textfield_enter: keyboard bindings from <inputdata>
+        let textfield = &result.action_maps[1].actions[0];
+        assert_eq!(textfield.name.as_ref(), "ui_textfield_enter");
+        let kb: Vec<_> = textfield
+            .bindings
+            .iter()
+            .filter(|b| b.device == Device::Keyboard)
+            .collect();
+        assert_eq!(kb.len(), 2);
+        assert_eq!(kb[0].input, "keyboard+enter");
+
+        // flashui_return: gamepad + joystick attributes + keyboard <inputdata>
+        let flashui = &result.action_maps[2].actions[0];
+        assert_eq!(flashui.name.as_ref(), "flashui_return");
+        assert!(
+            flashui.bindings.iter().any(|b| b.device == Device::Gamepad),
+            "gamepad attribute binding missing"
+        );
+        assert!(
+            flashui
+                .bindings
+                .iter()
+                .any(|b| b.device == Device::Joystick),
+            "joystick attribute binding missing"
+        );
+        let kb: Vec<_> = flashui
+            .bindings
+            .iter()
+            .filter(|b| b.device == Device::Keyboard)
+            .collect();
+        assert_eq!(kb.len(), 2, "keyboard <inputdata> bindings missing");
+
+        // flashui_mouse: mouse bindings from <inputdata>
+        let mouse_action = &result.action_maps[2].actions[1];
+        assert_eq!(mouse_action.name.as_ref(), "flashui_mouse");
+        let mouse_bindings: Vec<_> = mouse_action
+            .bindings
+            .iter()
+            .filter(|b| b.device == Device::Mouse)
+            .collect();
+        assert_eq!(mouse_bindings.len(), 2);
+        assert_eq!(mouse_bindings[0].input, "mouse+mouse1");
+        assert_eq!(mouse_bindings[1].input, "mouse+maxis_x");
+
+        // ui_up: keyboard attribute + gamepad <inputdata>
+        let ui_up = &result.action_maps[2].actions[2];
+        assert_eq!(ui_up.name.as_ref(), "ui_up");
+        let gp: Vec<_> = ui_up
+            .bindings
+            .iter()
+            .filter(|b| b.device == Device::Gamepad)
+            .collect();
+        assert_eq!(gp.len(), 2, "gamepad <inputdata> bindings missing");
+        assert_eq!(gp[0].input, "gamepad+dpad_up");
+        assert_eq!(gp[1].input, "gamepad+thumbr_up");
+        // keyboard attribute should still be parsed
+        assert!(
+            ui_up
+                .bindings
+                .iter()
+                .any(|b| b.device == Device::Keyboard && b.input == "keyboard+up"),
+            "keyboard attribute binding missing"
+        );
+    }
+
+    /// Verify that actions with <inputdata> keyboard bindings are NOT
+    /// assigned generated bindings by autofill (the original bug).
+    #[test]
+    fn autofill_skips_inputdata_bound_actions() {
+        use crate::bindings::autofill::{AutofillConfig, generate_bindings};
+
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<profile version="1">
+  <actionmap name="common" UILabel="@ui_Common" UICategory="@ui_CGUIGeneral">
+    <action name="focus_on_chat_textinput" activationMode="press" joystick=" " gamepad=" ">
+      <keyboard>
+        <inputdata input="enter"/>
+      </keyboard>
+    </action>
+    <action name="some_unbound_action" activationMode="press" keyboard=" " joystick=" " gamepad=" "/>
+  </actionmap>
+</profile>"#;
+
+        let translations = Translations::default();
+        let parsed = parse_default_profile(xml, &translations).unwrap();
+        let config = AutofillConfig::default();
+        let result = generate_bindings(&parsed, &config);
+
+        // some_unbound_action should get a generated binding
+        assert!(
+            result
+                .generated
+                .iter()
+                .any(|g| g.action_name == "some_unbound_action"),
+            "unbound action should get a binding"
+        );
+
+        // focus_on_chat_textinput must NOT get a generated binding
+        assert!(
+            result
+                .generated
+                .iter()
+                .all(|g| g.action_name != "focus_on_chat_textinput"),
+            "chat action with <inputdata> enter binding must be skipped by autofill"
+        );
     }
 
     #[test]
