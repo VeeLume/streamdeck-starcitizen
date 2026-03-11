@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-03-11
+
+### Bug Fixes
+
+- **parser:** Parse <inputdata> bindings to prevent autofill overwriting Enter key
+
+The defaultProfile.xml uses <inputdata> elements inside device child
+    elements (e.g. <keyboard><inputdata input="enter"/></keyboard>) for
+    some UI actions like focus_on_chat_textinput and ui_textfield_enter.
+    The parser did not recognise this format, so these actions appeared
+    unbound and autofill generated replacement combos, overwriting the
+    default Return→chat binding on profile import.
 ## [0.1.2] - 2026-03-09
 
 ### Bug Fixes
