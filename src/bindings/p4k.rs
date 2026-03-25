@@ -5,45 +5,46 @@ use svarog_cryxml::CryXml;
 use svarog_p4k::P4kArchive;
 use tracing::debug;
 
-/// Extract `defaultProfile.xml` from Data.p4k and convert CryXmlB to text XML.
-pub fn extract_default_profile(p4k_path: &Path) -> Result<String> {
+/// Extract both `defaultProfile.xml` and `global.ini` from Data.p4k in a single
+/// archive open, avoiding a second parse of the ~60K-entry central directory.
+///
+/// Returns `(profile_xml, ini_bytes)`.
+pub fn extract_profile_and_ini(p4k_path: &Path) -> Result<(String, Vec<u8>)> {
     let archive =
         P4kArchive::open(p4k_path).with_context(|| format!("Open P4K: {}", p4k_path.display()))?;
 
-    let entry = archive
+    debug!("P4K opened ({} entries)", archive.entry_count());
+
+    // Extract default profile
+    let profile_entry = archive
         .find("Data/Libs/Config/defaultProfile.xml")
         .with_context(|| "defaultProfile.xml not found in P4K")?;
 
-    let bytes = archive
-        .read(&entry)
+    let profile_bytes = archive
+        .read(&profile_entry)
         .with_context(|| "Failed to read defaultProfile.xml")?;
 
     debug!(
         "Extracted defaultProfile.xml ({} bytes, cryxml={})",
-        bytes.len(),
-        CryXml::is_cryxml(&bytes)
+        profile_bytes.len(),
+        CryXml::is_cryxml(&profile_bytes)
     );
 
-    convert_to_text_xml(&bytes, "defaultProfile.xml")
-}
+    let profile_xml = convert_to_text_xml(&profile_bytes, "defaultProfile.xml")?;
 
-/// Extract `global.ini` from Data.p4k.
-///
-/// Returns raw bytes (UTF-16 LE encoded INI file).
-pub fn extract_global_ini(p4k_path: &Path) -> Result<Vec<u8>> {
-    let archive =
-        P4kArchive::open(p4k_path).with_context(|| format!("Open P4K: {}", p4k_path.display()))?;
-
-    let entry = archive
+    // Extract global.ini
+    let ini_entry = archive
         .find("Data/Localization/english/global.ini")
         .with_context(|| "global.ini not found in P4K")?;
 
-    let bytes = archive
-        .read(&entry)
+    let ini_bytes = archive
+        .read(&ini_entry)
         .with_context(|| "Failed to read global.ini")?;
 
-    debug!("Extracted global.ini ({} bytes)", bytes.len());
-    Ok(bytes)
+    debug!("Extracted global.ini ({} bytes)", ini_bytes.len());
+
+    // archive (mmap + entry table) dropped here
+    Ok((profile_xml, ini_bytes))
 }
 
 /// Convert bytes to text XML, handling CryXmlB if needed.

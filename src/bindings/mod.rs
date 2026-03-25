@@ -31,7 +31,7 @@ pub const HIDDEN_ACTION_MAPS: &[&str] = &[
 ];
 
 use self::overlay::{apply_overlay, parse_user_overlay};
-use self::p4k::{extract_default_profile, extract_global_ini};
+use self::p4k::extract_profile_and_ini;
 use self::parser::parse_default_profile;
 use self::translations::parse_global_ini;
 
@@ -44,8 +44,8 @@ pub struct LoadedBindings {
 /// Load and parse all bindings from a Star Citizen installation.
 ///
 /// Pipeline:
-/// 1. Extract `defaultProfile.xml` from `Data.p4k` (CryXmlB → text XML)
-/// 2. Extract `global.ini` from `Data.p4k` (UTF-16 LE translations)
+/// 1. Open `Data.p4k` once, extract both `defaultProfile.xml` and `global.ini`
+/// 2. Parse translations from `global.ini`
 /// 3. Parse the default profile XML with translations
 /// 4. Apply user overlay from `actionmaps.xml` (if it exists)
 ///
@@ -56,12 +56,11 @@ pub fn load_bindings(install_path: &Path) -> Result<LoadedBindings> {
 
     info!("Loading bindings from {}", p4k_path.display());
 
-    // Step 1: Extract and convert default profile
-    let profile_xml =
-        extract_default_profile(&p4k_path).context("Failed to extract default profile")?;
+    // Step 1: Extract both files from a single archive open.
+    let (profile_xml, ini_bytes) =
+        extract_profile_and_ini(&p4k_path).context("Failed to extract from P4K")?;
 
     // Step 2: Extract translations
-    let ini_bytes = extract_global_ini(&p4k_path).context("Failed to extract global.ini")?;
     let translations = parse_global_ini(&ini_bytes);
     debug!("Loaded {} translations", translations.len());
 
@@ -106,10 +105,9 @@ pub fn load_bindings_defaults_only(install_path: &Path) -> Result<ParsedBindings
 
     info!("Loading default-only bindings from {}", p4k_path.display());
 
-    let profile_xml =
-        extract_default_profile(&p4k_path).context("Failed to extract default profile")?;
+    let (profile_xml, ini_bytes) =
+        extract_profile_and_ini(&p4k_path).context("Failed to extract from P4K")?;
 
-    let ini_bytes = extract_global_ini(&p4k_path).context("Failed to extract global.ini")?;
     let translations = parse_global_ini(&ini_bytes);
     debug!("Loaded {} translations", translations.len());
 
