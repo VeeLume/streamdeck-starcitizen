@@ -113,6 +113,16 @@ See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation, coding conve
 
 See [docs/star-citizen-domain.md](docs/star-citizen-domain.md) for Star Citizen domain knowledge (keybinding system, installation discovery, translations).
 
+## Acknowledgements
+
+- [svarog](https://github.com/19h/svarog) by [@19h](https://github.com/19h) — Rust library for reading Star Citizen's `Data.p4k` archives and converting CryXML to standard XML
+- [sdpi-components](https://github.com/GeekyEggo/sdpi-components) by [@GeekyEggo](https://github.com/GeekyEggo) — web-component library for building Stream Deck Property Inspector UIs
+
+## Similar Projects
+
+- [streamdeck-starcitizen](https://github.com/mhwlng/streamdeck-starcitizen) by mhwlng — the original Star Citizen Stream Deck plugin (C#), inspiration for this project
+- [SCStreamDeck](https://github.com/Jarex985/SCStreamDeck/) by Jarex985
+
 ## License
 
 MIT OR Apache-2.0
