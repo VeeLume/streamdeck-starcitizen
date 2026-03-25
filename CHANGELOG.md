@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-03-25
+
+### Bug Fixes
+
+- **hooks:** Only re-stage already-staged files after cargo fmt
+
+### Features
+
+- **bindings:** Add TOML generator config, mtime polling watcher, and category overrides
+
+Replace the `notify`-based file watcher with mtime polling to avoid
+    Windows ReadDirectoryChangesW reliability issues. The watcher now reloads
+    bindings directly instead of delegating via a topic. Add a TOML-based
+    generator config system for customising candidate keys, deny combos, and
+    category groups. Support ignoring user binds and add category overrides
+    to fix maps with missing UICategory (e.g. vehicle_mfd).
+- **actions:** Fire hold action during key press instead of on release
+
+Spawn a timer thread on key_down that fires the hold action after the
+    threshold elapses while the key is still held. Cancel via AtomicBool on
+    early release. This gives immediate tactile feedback instead of waiting
+    for key_up.
 ## [0.1.3] - 2026-03-11
 
 ### Bug Fixes
