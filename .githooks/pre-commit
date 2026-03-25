@@ -2,7 +2,13 @@
 set -euo pipefail
 
 echo "▶ cargo fmt (auto-fix)"
+
+# Remember which files are currently staged (excluding deleted files)
+STAGED=$(git diff --cached --name-only --diff-filter=d)
+
 cargo fmt --all
 
-# include any changes rustfmt made
-git add -A
+# Re-stage only the files that were already staged (picks up fmt changes)
+if [ -n "$STAGED" ]; then
+    echo "$STAGED" | xargs git add
+fi
