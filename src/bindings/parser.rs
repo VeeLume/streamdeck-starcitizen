@@ -590,6 +590,56 @@ mod tests {
         );
     }
 
+    /// Regression: vehicle_mfd has UILabel="@ui_CG_MFDs" but no UICategory.
+    /// Without the fallback, it gets an implicit group and autofill assigns
+    /// the same combo to both seat_general and vehicle_mfd actions (e.g.
+    /// v_toggle_flight_mode and v_mfd_soft_select_mfd_primary_short both
+    /// getting rctrl+lalt+f1).
+    #[test]
+    fn missing_ui_category_falls_back_to_ui_label() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<profile version="1">
+  <actionmap name="seat_general" UILabel="@ui_CGSeatGeneral" UICategory="@ui_CCSeatGeneral">
+    <action name="v_toggle_flight_mode" activationMode="press" keyboard=" " UILabel="@ui_Toggle"/>
+  </actionmap>
+  <actionmap name="vehicle_mfd" UILabel="@ui_CG_MFDs">
+    <action name="v_mfd_soft_select_mfd_primary_short" activationMode="tap" keyboard=" " UILabel="@ui_MFD"/>
+  </actionmap>
+</profile>"#;
+
+        let translations = Translations::default();
+        let parsed = parse_default_profile(xml, &translations).unwrap();
+
+        // vehicle_mfd has no UICategory — parser should store empty string
+        let mfd_map = parsed
+            .action_maps
+            .iter()
+            .find(|m| m.name.as_ref() == "vehicle_mfd")
+            .unwrap();
+        assert_eq!(
+            mfd_map.ui_category.as_ref(),
+            "",
+            "vehicle_mfd has no UICategory in the XML"
+        );
+
+        // The default AutofillConfig overrides vehicle_mfd → @ui_CG_MFDs,
+        // so autofill must not assign the same combo to both maps.
+        use crate::bindings::autofill::{AutofillConfig, generate_bindings};
+        let config = AutofillConfig::default();
+        let result = generate_bindings(&parsed, &config);
+
+        assert_eq!(
+            result.generated.len(),
+            2,
+            "both unbound actions should get bindings"
+        );
+        let combos: Vec<String> = result.generated.iter().map(|g| g.combo_key()).collect();
+        assert_ne!(
+            combos[0], combos[1],
+            "seat_general and vehicle_mfd actions must not share the same combo"
+        );
+    }
+
     #[test]
     fn parse_real_default_profile() {
         let path = "p4k-extracted/Data/Libs/Config/defaultProfile.xml";

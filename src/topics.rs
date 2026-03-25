@@ -30,16 +30,6 @@ pub const ICON_FOLDER_CHANGED: TopicId<IconFolderChanged> =
 #[derive(Debug, Clone)]
 pub struct IconFolderChanged;
 
-// ── Bindings Reload Requested ────────────────────────────────────────────────
-
-/// Published by the binding file watcher when `actionmaps.xml` changes on disk.
-/// The handler should call `reload_bindings()` in response.
-pub const BINDINGS_RELOAD_REQUESTED: TopicId<BindingsReloadRequested> =
-    TopicId::new("starcitizen.bindings-reload-requested");
-
-#[derive(Debug, Clone)]
-pub struct BindingsReloadRequested;
-
 // ── Installations Refreshed ──────────────────────────────────────────────────
 
 /// Published after a full re-scan of installations.

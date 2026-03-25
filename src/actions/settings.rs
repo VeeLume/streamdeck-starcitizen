@@ -53,7 +53,7 @@ impl Action for SettingsAction {
         &[
             topics::INSTALLATION_CHANGED.name,
             topics::INSTALLATIONS_REFRESHED.name,
-            topics::BINDINGS_RELOAD_REQUESTED.name,
+            topics::BINDINGS_RELOADED.name,
             topics::STYLE_CHANGED.name,
         ]
     }
@@ -152,14 +152,9 @@ impl Action for SettingsAction {
     }
 
     fn on_notify(&mut self, cx: &Context, ctx_id: &str, event: &ErasedTopic) {
-        if event.downcast(topics::BINDINGS_RELOAD_REQUESTED).is_some() {
-            debug!("SettingsAction: file watcher requested binding reload");
-            self.reload_bindings(cx);
-            self.render_status(cx, ctx_id);
-            return;
-        }
         if event.downcast(topics::INSTALLATION_CHANGED).is_some()
             || event.downcast(topics::INSTALLATIONS_REFRESHED).is_some()
+            || event.downcast(topics::BINDINGS_RELOADED).is_some()
             || event.downcast(topics::STYLE_CHANGED).is_some()
         {
             self.render_status(cx, ctx_id);

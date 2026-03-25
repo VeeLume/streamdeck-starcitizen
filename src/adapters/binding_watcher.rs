@@ -1,24 +1,29 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use crossbeam_channel::{Receiver, bounded, select};
-use notify::{EventKind, RecursiveMode, Watcher};
 use streamdeck_lib::prelude::*;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
+use crate::state::bindings::{BindingsData, BindingsState};
 use crate::state::installations::ActiveInstallationState;
 use crate::topics;
 
-/// Watches `actionmaps.xml` for changes while Star Citizen is running.
+/// Watches `actionmaps.xml` for changes by polling its modification time.
 ///
 /// When the file changes (e.g. the player exits the SC keybinding settings),
-/// publishes `BINDINGS_RELOAD_REQUESTED` so that an action handler can trigger
-/// a full binding reload.
+/// reloads bindings directly and publishes `BINDINGS_RELOADED` so actions
+/// can re-render. This runs independently of any visible action — it does not
+/// require a Settings key on the deck.
 ///
-/// Subscribes to `INSTALLATION_CHANGED` so the watcher can start (or move)
-/// even if the active installation isn't known at adapter startup.
+/// Uses `OnAppLaunch` start policy (only polls while SC is running) with mtime
+/// polling instead of OS-level file
+/// watching. This avoids Windows `ReadDirectoryChangesW` reliability issues
+/// and gracefully handles the file/directory not yet existing.
 pub struct BindingWatcherAdapter;
+
+const POLL_INTERVAL: Duration = Duration::from_secs(3);
 
 /// Resolve the `actionmaps.xml` path from the current active installation.
 fn resolve_overlay_path(state: &Option<Arc<ActiveInstallationState>>) -> Option<PathBuf> {
@@ -29,50 +34,66 @@ fn resolve_overlay_path(state: &Option<Arc<ActiveInstallationState>>) -> Option<
     })
 }
 
-/// Create a file-system watcher for the directory containing `overlay_path`,
-/// filtering events to only the target filename. Returns `None` on failure.
-fn create_watcher(
-    overlay_path: &PathBuf,
-    file_tx: crossbeam_channel::Sender<()>,
-) -> Option<notify::RecommendedWatcher> {
-    let watch_dir = overlay_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| overlay_path.clone());
+/// Read the file's mtime, returning `None` if the file doesn't exist.
+fn file_mtime(path: &PathBuf) -> Option<SystemTime> {
+    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
+}
 
-    let target_filename = overlay_path.file_name().map(|f| f.to_os_string());
+/// Load bindings and store the result. Returns `true` on success.
+fn do_reload(
+    install_state: &Option<Arc<ActiveInstallationState>>,
+    bindings_state: &Option<Arc<BindingsState>>,
+    bus: &Arc<dyn Bus>,
+) -> bool {
+    let install_path = install_state.as_ref().and_then(|state| {
+        let snap = state.snapshot();
+        snap.current().map(|i| i.path.clone())
+    });
 
-    let mut watcher =
-        match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(event) = res
-                && matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_))
-            {
-                let is_target = event
-                    .paths
-                    .iter()
-                    .any(|p| p.file_name().map(|f| f.to_os_string()) == target_filename);
-                if is_target {
-                    let _ = file_tx.send(());
-                }
+    let Some(path) = install_path else {
+        warn!("BindingWatcher: no active installation to reload from");
+        return false;
+    };
+
+    info!("BindingWatcher: reloading bindings from {}", path.display());
+    match crate::bindings::load_bindings(&path) {
+        Ok(loaded) => {
+            let channel = install_state
+                .as_ref()
+                .and_then(|s| s.snapshot().current().map(|i| i.channel));
+
+            let action_count = loaded.bindings.action_count();
+
+            if let Some(state) = bindings_state {
+                state.replace(BindingsData {
+                    bindings: Some(loaded.bindings),
+                    user_overrides: loaded.user_overrides,
+                    channel,
+                    error: None,
+                });
             }
-        }) {
-            Ok(w) => w,
-            Err(e) => {
-                warn!("BindingWatcher: failed to create watcher: {e}");
-                return None;
-            }
-        };
 
-    if let Err(e) = watcher.watch(&watch_dir, RecursiveMode::NonRecursive) {
-        warn!(
-            "BindingWatcher: failed to watch {}: {e}",
-            watch_dir.display()
-        );
-        return None;
+            bus.publish_t(topics::BINDINGS_RELOADED, topics::BindingsReloaded);
+            info!("BindingWatcher: reloaded ({action_count} actions)");
+            true
+        }
+        Err(e) => {
+            let msg = format!("{e:#}");
+            warn!("BindingWatcher: reload failed: {msg}");
+
+            if let Some(state) = bindings_state {
+                state.replace(BindingsData {
+                    bindings: None,
+                    user_overrides: Vec::new(),
+                    channel: None,
+                    error: Some(msg),
+                });
+            }
+
+            bus.publish_t(topics::BINDINGS_RELOADED, topics::BindingsReloaded);
+            false
+        }
     }
-
-    info!("BindingWatcher: watching {}", overlay_path.display());
-    Some(watcher)
 }
 
 impl Adapter for BindingWatcherAdapter {
@@ -96,20 +117,24 @@ impl Adapter for BindingWatcherAdapter {
     ) -> AdapterResult {
         let (stop_tx, stop_rx) = bounded::<()>(1);
         let install_state = cx.try_ext::<ActiveInstallationState>();
+        let bindings_state = cx.try_ext::<BindingsState>();
 
         let join = std::thread::spawn(move || {
-            let debounce = Duration::from_secs(1);
-            let mut last_reload = Instant::now() - debounce;
+            let mut last_mtime: Option<SystemTime> = None;
+            let mut current_path: Option<PathBuf> = resolve_overlay_path(&install_state);
 
-            // Channel bridging notify's callback into our select loop.
-            // Cloned into each new watcher; all clones feed the same receiver.
-            let (file_tx, file_rx) = bounded::<()>(8);
-
-            // Try to set up the watcher immediately (installation may already be known)
-            let mut active_watcher = resolve_overlay_path(&install_state)
-                .and_then(|p| create_watcher(&p, file_tx.clone()));
-
-            if active_watcher.is_none() {
+            // Seed mtime from the current file (if it exists)
+            if let Some(ref path) = current_path {
+                last_mtime = file_mtime(path);
+                if last_mtime.is_some() {
+                    info!("BindingWatcher: watching {} (poll)", path.display());
+                } else {
+                    debug!(
+                        "BindingWatcher: {} not yet present, will poll",
+                        path.display()
+                    );
+                }
+            } else {
                 info!("BindingWatcher: no active installation yet, waiting for topic");
             }
 
@@ -118,23 +143,38 @@ impl Adapter for BindingWatcherAdapter {
                     recv(stop_rx) -> _ => break,
                     recv(inbox) -> msg => {
                         if let Ok(ev) = msg
-                            && ev.downcast(topics::INSTALLATION_CHANGED).is_some() {
-                                // Drop old watcher (stops the watch), set up for new path
-                                active_watcher = resolve_overlay_path(&install_state)
-                                    .and_then(|p| create_watcher(&p, file_tx.clone()));
-                                if active_watcher.is_none() {
-                                    info!("BindingWatcher: installation cleared, watcher removed");
+                            && ev.downcast(topics::INSTALLATION_CHANGED).is_some()
+                        {
+                            let new_path = resolve_overlay_path(&install_state);
+                            if new_path != current_path {
+                                current_path = new_path;
+                                // Reset mtime so we don't false-trigger on the new path
+                                last_mtime = current_path.as_ref().and_then(file_mtime);
+                                if let Some(ref path) = current_path {
+                                    info!("BindingWatcher: now watching {}", path.display());
+                                } else {
+                                    info!("BindingWatcher: installation cleared");
                                 }
                             }
+                        }
                     },
-                    recv(file_rx) -> _ => {
-                        if last_reload.elapsed() >= debounce {
-                            info!("BindingWatcher: actionmaps.xml changed, requesting reload");
-                            bus.publish_t(
-                                topics::BINDINGS_RELOAD_REQUESTED,
-                                topics::BindingsReloadRequested,
-                            );
-                            last_reload = Instant::now();
+                    default(POLL_INTERVAL) => {
+                        let Some(ref path) = current_path else { continue };
+                        let current_mtime = file_mtime(path);
+
+                        // Detect change: file appeared or mtime advanced
+                        let changed = match (last_mtime, current_mtime) {
+                            (None, Some(_)) => true,
+                            (Some(old), Some(new)) => new > old,
+                            _ => false,
+                        };
+
+                        if changed {
+                            do_reload(&install_state, &bindings_state, &bus);
+                            // Re-read mtime AFTER reload completes to absorb any
+                            // writes that happened during the ~3s reload window,
+                            // preventing cascade reloads.
+                            last_mtime = file_mtime(path);
                         }
                     }
                 }

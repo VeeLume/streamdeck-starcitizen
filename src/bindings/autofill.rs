@@ -22,6 +22,10 @@ pub struct AutofillConfig {
     /// Groups of UI categories that can be active simultaneously.
     /// Actions within the same group must not share a key combo.
     pub category_groups: Vec<Vec<String>>,
+    /// Override the category for specific action maps.
+    /// Maps action map name → category string. Used to fix maps that are missing
+    /// or have an incorrect UICategory in SC's defaultProfile.xml.
+    pub category_overrides: HashMap<String, String>,
     /// Auto-detect modifiers used as main keys and deny them for that group.
     pub auto_detect_deny_modifiers: bool,
     /// Profile name for the output XML.
@@ -39,6 +43,7 @@ impl Default for AutofillConfig {
                 .map(|&s| s.to_string())
                 .collect(),
             category_groups: default_category_groups(),
+            category_overrides: default_category_overrides(),
             auto_detect_deny_modifiers: true,
             profile_name: "icu-veelume-starcitizen".to_string(),
         }
@@ -113,7 +118,6 @@ fn default_candidate_modifiers() -> Vec<String> {
 fn default_deny_combos() -> HashSet<String> {
     let mut set = HashSet::new();
     set.insert("lalt+f4".into()); // Windows close
-    set.insert("lctrl+lalt+np_0".into()); // Common system shortcut
     set.insert("lctrl+lalt+delete".into()); // Windows security screen
     set.insert("lctrl+insert".into()); // System copy
     set.insert("lshift+insert".into()); // System paste
@@ -157,6 +161,16 @@ fn default_category_groups() -> Vec<Vec<String>> {
         vec!["@ui_CGEASpectator".into(), "@ui_CGUIGeneral".into()],
         vec!["@ui_CCCamera".into(), "@ui_CGUIGeneral".into()],
     ]
+}
+
+/// Action maps whose UICategory is missing or wrong in SC's defaultProfile.xml.
+/// Maps action map name → the category it should belong to.
+fn default_category_overrides() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    // vehicle_mfd has UILabel="@ui_CG_MFDs" but no UICategory attribute,
+    // so it falls out of conflict tracking against seat_general / spaceflight.
+    map.insert("vehicle_mfd".into(), "@ui_CG_MFDs".into());
+    map
 }
 
 // ── Generated Binding ───────────────────────────────────────────────────────────
@@ -210,8 +224,13 @@ pub fn generate_bindings(bindings: &ParsedBindings, config: &AutofillConfig) -> 
     let mut modifier_as_main_per_group: HashMap<usize, HashSet<String>> = HashMap::new();
 
     for map in &bindings.action_maps {
+        let effective_category = config
+            .category_overrides
+            .get(map.name.as_ref())
+            .map(|s| s.as_str())
+            .unwrap_or(&map.ui_category);
         let groups = resolve_groups(
-            &map.ui_category,
+            effective_category,
             &group_for_category,
             &mut implicit_groups,
             &mut next_group_idx,
@@ -261,8 +280,13 @@ pub fn generate_bindings(bindings: &ParsedBindings, config: &AutofillConfig) -> 
             continue;
         }
 
+        let effective_category = config
+            .category_overrides
+            .get(map.name.as_ref())
+            .map(|s| s.as_str())
+            .unwrap_or(&map.ui_category);
         let groups = resolve_groups(
-            &map.ui_category,
+            effective_category,
             &group_for_category,
             &mut implicit_groups,
             &mut next_group_idx,

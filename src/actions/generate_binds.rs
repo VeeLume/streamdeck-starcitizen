@@ -3,7 +3,8 @@ use streamdeck_lib::{incoming::*, prelude::*};
 use tracing::{debug, info, warn};
 
 use crate::PLUGIN_ID;
-use crate::bindings::autofill::{AutofillConfig, generate_bindings, render_xml};
+use crate::bindings::autofill::{generate_bindings, render_xml};
+use crate::bindings::generator_config;
 use crate::render;
 use crate::state::bindings::BindingsState;
 use crate::state::installations::ActiveInstallationState;
@@ -17,6 +18,7 @@ use crate::topics;
 pub struct GenerateBindsAction {
     profile_name: String,
     output_path_override: String,
+    ignore_user_binds: bool,
     last_generated_count: Option<usize>,
     last_skipped_count: Option<usize>,
     key_style: String,
@@ -55,29 +57,60 @@ impl Action for GenerateBindsAction {
         let style = self.resolve_style(cx);
         render::render_progress(cx, ev.context, "Generating\u{2026}", &style);
 
-        // Check bindings are loaded
-        let Some(bindings_state) = cx.try_ext::<BindingsState>() else {
-            warn!("BindingsState not available");
-            cx.sd().show_alert(ev.context);
-            return;
+        // Load generator config from TOML (or defaults if file missing)
+        let mut config = match generator_config::load_config() {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Generator config error: {e}");
+                render::render_progress(cx, ev.context, "Config error", &style);
+                cx.sd().show_alert(ev.context);
+                return;
+            }
         };
+        config.profile_name = self.effective_profile_name();
 
-        let snap = bindings_state.snapshot();
-        let Some(ref bindings) = snap.bindings else {
-            warn!("No bindings loaded — load bindings first");
-            render::render_progress(cx, ev.context, "No bindings", &style);
-            cx.sd().show_alert(ev.context);
-            return;
-        };
+        // Resolve bindings: either from state or fresh defaults-only
+        let (bindings_owned, user_overrides);
+        if self.ignore_user_binds {
+            // Re-read Data.p4k for clean defaults (no user overlay)
+            let Some(install_path) = self.resolve_install_path(cx) else {
+                warn!("No active installation");
+                render::render_progress(cx, ev.context, "No install", &style);
+                cx.sd().show_alert(ev.context);
+                return;
+            };
+            match crate::bindings::load_bindings_defaults_only(&install_path) {
+                Ok(b) => {
+                    bindings_owned = b;
+                    user_overrides = Vec::new();
+                }
+                Err(e) => {
+                    warn!("Failed to load default bindings: {e}");
+                    render::render_progress(cx, ev.context, "Load error", &style);
+                    cx.sd().show_alert(ev.context);
+                    return;
+                }
+            }
+        } else {
+            // Use cached bindings from state
+            let Some(bindings_state) = cx.try_ext::<BindingsState>() else {
+                warn!("BindingsState not available");
+                cx.sd().show_alert(ev.context);
+                return;
+            };
+            let snap = bindings_state.snapshot();
+            let Some(ref bindings) = snap.bindings else {
+                warn!("No bindings loaded — load bindings first");
+                render::render_progress(cx, ev.context, "No bindings", &style);
+                cx.sd().show_alert(ev.context);
+                return;
+            };
+            bindings_owned = bindings.clone();
+            user_overrides = snap.user_overrides.clone();
+        }
 
-        // Build config
-        let config = AutofillConfig {
-            profile_name: self.effective_profile_name(),
-            ..AutofillConfig::default()
-        };
-
-        // Generate bindings (includes both default + user bindings as occupied)
-        let result = generate_bindings(bindings, &config);
+        // Generate bindings
+        let result = generate_bindings(&bindings_owned, &config);
         let count = result.generated.len();
         let skipped = result.skipped.len();
 
@@ -101,12 +134,8 @@ impl Action for GenerateBindsAction {
             }
         }
 
-        // Render XML (include user overrides to preserve their customisations)
-        let xml = render_xml(
-            &result.generated,
-            &snap.user_overrides,
-            &config.profile_name,
-        );
+        // Render XML (include user overrides only when not ignoring them)
+        let xml = render_xml(&result.generated, &user_overrides, &config.profile_name);
 
         // Resolve output path
         let output_dir = if !self.output_path_override.is_empty() {
@@ -155,6 +184,45 @@ impl Action for GenerateBindsAction {
         self.render_status(cx, ev.context);
     }
 
+    fn property_inspector_did_appear(&mut self, cx: &Context, ev: &PropertyInspectorDidAppear) {
+        self.send_config_status(cx, ev.context);
+    }
+
+    fn did_receive_property_inspector_message(
+        &mut self,
+        cx: &Context,
+        ev: &DidReceivePropertyInspectorMessage,
+        is_sdpi: bool,
+    ) {
+        if is_sdpi {
+            return;
+        }
+
+        let action = ev
+            .payload
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        match action {
+            "openGeneratorConfig" => {
+                if let Err(e) = generator_config::open_config() {
+                    warn!("Failed to open generator config: {e}");
+                }
+                self.send_config_status(cx, ev.context);
+            }
+            "resetGeneratorConfig" => {
+                if let Err(e) = generator_config::reset_config() {
+                    warn!("Failed to reset generator config: {e}");
+                }
+                self.send_config_status(cx, ev.context);
+            }
+            "getConfigStatus" => {
+                self.send_config_status(cx, ev.context);
+            }
+            _ => {}
+        }
+    }
+
     fn did_receive_sdpi_request(&mut self, cx: &Context, req: &DataSourceRequest<'_>) {
         if req.event == "getStyles" {
             reply_styles(cx, req);
@@ -185,6 +253,9 @@ impl GenerateBindsAction {
         if let Some(v) = settings.get("outputPath").and_then(|v| v.as_str()) {
             self.output_path_override = v.to_string();
         }
+        if let Some(v) = settings.get("ignoreUserBinds").and_then(|v| v.as_bool()) {
+            self.ignore_user_binds = v;
+        }
         if let Some(v) = settings.get("keyStyle").and_then(|v| v.as_str()) {
             self.key_style = v.to_string();
         }
@@ -198,18 +269,35 @@ impl GenerateBindsAction {
         }
     }
 
-    fn resolve_default_output_dir(&self, cx: &Context) -> Option<std::path::PathBuf> {
+    fn resolve_install_path(&self, cx: &Context) -> Option<std::path::PathBuf> {
         let state = cx.try_ext::<ActiveInstallationState>()?;
         let snap = state.snapshot();
         let inst = snap.current()?;
-        Some(
-            inst.path
-                .join("user")
+        Some(inst.path.clone())
+    }
+
+    fn resolve_default_output_dir(&self, cx: &Context) -> Option<std::path::PathBuf> {
+        self.resolve_install_path(cx).map(|p| {
+            p.join("user")
                 .join("client")
                 .join("0")
                 .join("controls")
-                .join("mappings"),
-        )
+                .join("mappings")
+        })
+    }
+
+    fn send_config_status(&self, cx: &Context, ctx_id: &str) {
+        let error = match generator_config::validate_config() {
+            Ok(()) => serde_json::Value::Null,
+            Err(msg) => serde_json::Value::String(msg),
+        };
+        cx.sd().send_to_property_inspector(
+            ctx_id,
+            serde_json::json!({
+                "type": "configStatus",
+                "error": error,
+            }),
+        );
     }
 
     fn resolve_style(&self, cx: &Context) -> KeyStyle {

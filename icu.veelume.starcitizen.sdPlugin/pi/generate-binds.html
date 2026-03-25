@@ -15,6 +15,21 @@
     <sdpi-item label="Output Path">
         <sdpi-textfield setting="outputPath" placeholder="Auto (install/user/client/0/controls/mappings)"></sdpi-textfield>
     </sdpi-item>
+    <sdpi-item label="Ignore User Binds">
+        <sdpi-checkbox setting="ignoreUserBinds"></sdpi-checkbox>
+    </sdpi-item>
+
+    <sdpi-item label="Generator Config">
+        <div class="sdpi-item-value" style="display:flex;gap:6px">
+            <button id="btnOpenConfig" style="flex:1">Edit Settings</button>
+            <button id="btnResetConfig" style="flex:1">Reset</button>
+        </div>
+    </sdpi-item>
+    <div id="configError" style="display:none">
+        <sdpi-item label="">
+            <div class="sdpi-item-value" style="font-size:11px;color:#e74c3c" id="configErrorText"></div>
+        </sdpi-item>
+    </div>
 
     <details>
         <summary>Help</summary>
@@ -22,6 +37,8 @@
             <div class="sdpi-item-value" style="font-size: 11px; color: #999;">
                 <strong>Profile Name</strong> — name for the generated XML file and SC profile.<br/>
                 <strong>Output Path</strong> — override the output directory. Leave empty to auto-detect from the active installation.<br/>
+                <strong>Ignore User Binds</strong> — when enabled, the generator treats all actions as unbound (ignores your actionmaps.xml customisations).<br/>
+                <strong>Generator Config</strong> — edit the TOML file to customise candidate keys, deny combos, skip maps, and category groups.<br/>
                 <br/>
                 Press the button to generate conflict-free keyboard bindings for all unbound actions.
                 The generated file can be imported in Star Citizen's keybinding settings.<br/>
@@ -35,5 +52,35 @@
             </div>
         </sdpi-item>
     </details>
+
+    <script>
+        // Ask for config validation status on load
+        SDPIComponents.streamDeckClient.send('sendToPlugin', { action: 'getConfigStatus' });
+
+        // Handle messages from plugin
+        SDPIComponents.streamDeckClient.sendToPropertyInspector.subscribe((msg) => {
+            const data = msg.payload;
+            if (data.type === 'configStatus') {
+                const errorDiv = document.getElementById('configError');
+                const errorText = document.getElementById('configErrorText');
+                if (data.error) {
+                    errorText.textContent = data.error;
+                    errorDiv.style.display = '';
+                } else {
+                    errorDiv.style.display = 'none';
+                    errorText.textContent = '';
+                }
+            }
+        });
+
+        // Button handlers
+        document.getElementById('btnOpenConfig').addEventListener('click', () => {
+            SDPIComponents.streamDeckClient.send('sendToPlugin', { action: 'openGeneratorConfig' });
+        });
+
+        document.getElementById('btnResetConfig').addEventListener('click', () => {
+            SDPIComponents.streamDeckClient.send('sendToPlugin', { action: 'resetGeneratorConfig' });
+        });
+    </script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 pub mod autofill;
 pub mod executor;
+pub mod generator_config;
 pub mod model;
 pub mod overlay;
 pub mod p4k;
@@ -93,4 +94,33 @@ pub fn load_bindings(install_path: &Path) -> Result<LoadedBindings> {
         bindings,
         user_overrides,
     })
+}
+
+/// Load default bindings only (no user overlay).
+///
+/// This runs steps 1-3 of [`load_bindings`] — extract from Data.p4k, load
+/// translations, and parse the default profile — but skips the user overlay.
+/// Used when generating bindings with "ignore user binds" enabled.
+pub fn load_bindings_defaults_only(install_path: &Path) -> Result<ParsedBindings> {
+    let p4k_path = install_path.join("Data.p4k");
+
+    info!("Loading default-only bindings from {}", p4k_path.display());
+
+    let profile_xml =
+        extract_default_profile(&p4k_path).context("Failed to extract default profile")?;
+
+    let ini_bytes = extract_global_ini(&p4k_path).context("Failed to extract global.ini")?;
+    let translations = parse_global_ini(&ini_bytes);
+    debug!("Loaded {} translations", translations.len());
+
+    let bindings =
+        parse_default_profile(&profile_xml, &translations).context("Failed to parse profile")?;
+
+    info!(
+        "Parsed {} action maps, {} actions (defaults only)",
+        bindings.map_count(),
+        bindings.action_count()
+    );
+
+    Ok(bindings)
 }
