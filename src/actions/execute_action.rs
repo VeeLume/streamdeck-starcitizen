@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use constcat::concat;
@@ -44,6 +46,8 @@ pub struct ExecuteAction {
     key_down_at: Option<Instant>,
     last_up_at: Option<Instant>,
     awaiting_double: bool,
+    hold_cancel: Option<Arc<AtomicBool>>,
+    hold_fired: Arc<AtomicBool>,
 }
 
 impl Default for ExecuteAction {
@@ -66,6 +70,8 @@ impl Default for ExecuteAction {
             key_down_at: None,
             last_up_at: None,
             awaiting_double: false,
+            hold_cancel: None,
+            hold_fired: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -205,8 +211,9 @@ impl Action for ExecuteAction {
             return;
         }
 
-        // Record the press time for hold detection
+        // Record the press time and reset hold state
         self.key_down_at = Some(Instant::now());
+        self.hold_fired.store(false, Ordering::SeqCst);
 
         // Check if this is a double-press (second press within window)
         if self.double_enabled && self.awaiting_double {
@@ -224,20 +231,47 @@ impl Action for ExecuteAction {
             // Window expired, this is a new press
             self.awaiting_double = false;
         }
+
+        // Start hold timer: fires the hold action after threshold while key is still down
+        if self.hold_enabled && !self.hold_action.is_empty() {
+            let cancel = Arc::new(AtomicBool::new(false));
+            self.hold_cancel = Some(cancel.clone());
+            let fired = self.hold_fired.clone();
+
+            if let Some(combo) = self.resolve_combo(cx, &self.hold_map, &self.hold_action) {
+                let threshold = self.hold_threshold_ms;
+                let ctx_id = ev.context.to_string();
+                let sd = cx.sd().clone();
+                let bus = cx.bus();
+
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(threshold));
+                    if cancel.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    debug!("Hold fired (threshold {threshold}ms)");
+                    bus.execute(combo);
+                    fired.store(true, Ordering::SeqCst);
+                    sd.show_ok(&ctx_id);
+                });
+            }
+        }
     }
 
     fn key_up(&mut self, cx: &Context, ev: &KeyUp) {
-        let Some(down_at) = self.key_down_at.take() else {
+        // Cancel any pending hold timer
+        if let Some(cancel) = self.hold_cancel.take() {
+            cancel.store(true, Ordering::SeqCst);
+        }
+
+        let Some(_down_at) = self.key_down_at.take() else {
             return;
         };
-        let press_duration = down_at.elapsed();
 
-        // Hold detection: if held long enough, fire hold action
-        if self.hold_enabled && press_duration >= Duration::from_millis(self.hold_threshold_ms) {
-            debug!("Hold detected ({:?})", press_duration);
-            self.fire_hold(cx);
+        // If hold already fired during the press, we're done
+        if self.hold_fired.load(Ordering::SeqCst) {
+            self.hold_fired.store(false, Ordering::SeqCst);
             self.awaiting_double = false;
-            cx.sd().show_ok(ev.context);
             return;
         }
 
@@ -247,7 +281,6 @@ impl Action for ExecuteAction {
             self.last_up_at = Some(Instant::now());
 
             // Spawn a timer to fire primary if no second press arrives.
-            // We clone the context data we need since we can't move cx.
             let bus = cx.bus();
             let combo = self.resolve_primary_combo(cx);
             let window = self.double_window_ms;
@@ -257,9 +290,6 @@ impl Action for ExecuteAction {
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(window + 20));
                 // If we get here, no double-press occurred — fire primary
-                // Note: we can't check awaiting_double across threads, so we
-                // optimistically fire. The double-press path clears the timer
-                // by consuming key_down_at before this runs.
                 if let Some(combo) = combo {
                     bus.execute(combo);
                     sd.show_ok(&ctx_id);
@@ -463,15 +493,6 @@ impl ExecuteAction {
                 "No keyboard binding for {}.{}",
                 self.primary_map, self.primary_action
             );
-        }
-    }
-
-    fn fire_hold(&self, cx: &Context) {
-        if !self.hold_action.is_empty()
-            && let Some(combo) = self.resolve_combo(cx, &self.hold_map, &self.hold_action)
-        {
-            debug!("Firing hold: {combo}");
-            cx.bus().execute(combo);
         }
     }
 
