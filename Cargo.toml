@@ -13,6 +13,10 @@ path = "src/main.rs"
 name = "extract-p4k"
 path = "src/bin/extract_p4k.rs"
 
+[[bin]]
+name = "toggle-groups-gen"
+path = "src/bin/toggle_groups_gen.rs"
+
 [dependencies]
 anyhow           = "1"
 arc-swap         = "1"

@@ -89,6 +89,28 @@
                     "Image": "images/starting/generate-binds"
                 }
             ]
+        },
+        {
+            "UUID": "icu.veelume.starcitizen.toggle-action",
+            "Name": "Toggle Action",
+            "Icon": "images/toggle-action",
+            "Tooltip": "Toggle a Star Citizen action with on/off state tracking",
+            "PropertyInspectorPath": "pi/toggle-action.html",
+            "SupportedInMultiActions": true,
+            "DisableAutomaticStates": true,
+            "Controllers": [
+                "Keypad"
+            ],
+            "States": [
+                {
+                    "Image": "images/starting/toggle-action",
+                    "Name": "Off"
+                },
+                {
+                    "Image": "images/starting/toggle-action",
+                    "Name": "On"
+                }
+            ]
         }
     ]
 }

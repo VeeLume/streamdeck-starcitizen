@@ -120,16 +120,26 @@
         },
         {
             "label": "Build Plugin",
-            "dependsOn": [
-                "streamdeck: stop",
-                "rust: cargo build",
-                "copy to plugin directory",
-                "streamdeck: restart"
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/scripts/build-plugin.ps1"
             ],
-            "dependsOrder": "sequence",
+            "problemMatcher": [
+                "$rustc"
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
             }
         }
     ]

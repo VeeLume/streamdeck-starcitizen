@@ -20,11 +20,13 @@ use actions::execute_action::ExecuteAction;
 use actions::generate_binds::GenerateBindsAction;
 use actions::manage_version::ManageVersionAction;
 use actions::settings::SettingsAction;
+use actions::toggle_action::ToggleAction;
 use state::bindings::{BindingsData, BindingsState};
 use state::fonts::FontsState;
 use state::icon_folder::IconFolderState;
 use state::installations::ActiveInstallationState;
 use state::styles::StylesState;
+use state::toggle_groups::ToggleGroupsState;
 
 pub const PLUGIN_ID: &str = "icu.veelume.starcitizen";
 
@@ -56,10 +58,12 @@ fn main() -> anyhow::Result<()> {
         .add_extension(Arc::new(FontsState::load()))
         .add_extension(Arc::new(IconFolderState::new()))
         .add_extension(Arc::new(StylesState::load()))
+        .add_extension(Arc::new(ToggleGroupsState::load()))
         .add_action(ActionFactory::default_of::<ManageVersionAction>())
         .add_action(ActionFactory::default_of::<ExecuteAction>())
         .add_action(ActionFactory::default_of::<SettingsAction>())
         .add_action(ActionFactory::default_of::<GenerateBindsAction>())
+        .add_action(ActionFactory::default_of::<ToggleAction>())
         .add_adapter(InputAdapter::new())
         .add_adapter(adapters::binding_watcher::BindingWatcherAdapter);
 

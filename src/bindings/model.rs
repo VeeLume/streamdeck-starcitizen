@@ -41,6 +41,18 @@ pub struct GameAction {
     pub bindings: Vec<Binding>,
     /// Reference to the activation mode pool (e.g. "press", "hold").
     pub activation_mode: Option<String>,
+    /// Explicit states declared in the XML (e.g. on/off, locked/unlocked).
+    /// Present only on toggle-type actions.
+    pub states: Vec<ActionState>,
+}
+
+/// A named state on a toggle action (parsed from `<states>/<state>` in the XML).
+#[derive(Debug, Clone)]
+pub struct ActionState {
+    /// Internal state name (e.g. "on", "off", "locked", "unlocked").
+    pub name: String,
+    /// Translated display label.
+    pub ui_label: String,
 }
 
 /// A single input binding for an action.

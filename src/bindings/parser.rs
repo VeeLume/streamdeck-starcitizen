@@ -170,11 +170,31 @@ fn parse_game_action(node: &roxmltree::Node, translations: &Translations) -> Opt
         }
     }
 
+    // 4. Parse <states> children (toggle state declarations)
+    let mut states = Vec::new();
+    if let Some(states_node) = node.children().find(|n| n.has_tag_name("states")) {
+        for state_node in states_node.children().filter(|n| n.has_tag_name("state")) {
+            if let Some(state_name) = state_node.attribute("name") {
+                let state_ui_label = state_node.attribute("UILabel").unwrap_or("");
+                let state_ui_label = if !state_ui_label.is_empty() {
+                    translations.lookup_or_humanize(state_ui_label)
+                } else {
+                    Arc::from(state_name)
+                };
+                states.push(ActionState {
+                    name: state_name.to_string(),
+                    ui_label: state_ui_label.to_string(),
+                });
+            }
+        }
+    }
+
     Some(GameAction {
         name,
         ui_label,
         bindings,
         activation_mode,
+        states,
     })
 }
 
@@ -770,6 +790,7 @@ mod tests {
                 ui_label: "Test".into(),
                 bindings: vec![],
                 activation_mode: None,
+                states: vec![],
             };
             if executor::binding_to_combo(binding, &parsed.activation_modes, &dummy_action)
                 .is_some()

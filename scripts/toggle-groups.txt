@@ -1,0 +1,235 @@
+Parsed 50 actionmaps, 1097 total actions
+Found 44 real toggle actions (have <states> or activationMode=smart_toggle)
+
+================================================================================
+TOGGLE GROUPS WITH SIBLINGS (19)
+================================================================================
+
+[spaceship_general] v_toggle_all_doors  (states: opened, closed)
+    67% v_close_all_doors
+    67% v_open_all_doors
+
+[spaceship_general] v_toggle_all_doorlocks  (states: unlocked, locked)
+    25% v_lock_all_doors
+    25% v_lock_all_ports
+    25% v_unlock_all_doors
+    25% v_unlock_all_ports
+
+[spaceship_general] v_toggle_all_portlocks  (states: unlocked, locked)
+    25% v_lock_all_doors
+    25% v_lock_all_ports
+    25% v_unlock_all_doors
+    25% v_unlock_all_ports
+
+[spaceship_view] v_view_dynamic_zoom_abs_toggle  (smart_toggle)
+    100% v_view_dynamic_zoom_abs
+
+[spaceship_movement] v_ifcs_toggle_esp  (states: on, off)
+    67% v_ifcs_esp_hold
+
+[spaceship_movement] v_toggle_landing_system  (states: retracted, deployed, can_dock, docking, docked)
+    67% v_deploy_landing_system
+    67% v_retract_landing_system
+
+[spaceship_movement] v_auto_precision_mode_toggle  (states: on, off)
+    75% v_auto_precision_mode_off
+    75% v_auto_precision_mode_on
+
+[spaceship_movement] v_ifcs_proximity_assist_toggle  (states: on, off)
+    75% v_ifcs_proximity_assist_off
+    75% v_ifcs_proximity_assist_on
+
+[turret_movement] turret_toggle_mouse_mode  (smart_toggle)
+    75% turret_mouse_mode_cycle
+    75% turret_mouse_mode_set_1to1
+    75% turret_mouse_mode_set_pointer
+    75% turret_mouse_mode_set_vjoy
+
+[turret_advanced] turret_esp_toggle  (states: on, off)
+    67% turret_esp_hold
+
+[turret_advanced] turret_limiter_toggle  (smart_toggle)
+    67% turret_limiter_abs
+    67% turret_limiter_rel
+    50% turret_limiter_rel_decrease
+    50% turret_limiter_rel_increase
+
+[spaceship_power] v_power_toggle  (states: on, off)
+    50% v_power_set_off
+    50% v_power_set_on
+    33% v_power_set_shields_off
+    33% v_power_set_shields_on
+    33% v_power_set_thrusters_off
+    33% v_power_set_thrusters_on
+    33% v_power_set_weapons_off
+    33% v_power_set_weapons_on
+    33% v_power_throttle_down
+    33% v_power_throttle_max
+    33% v_power_throttle_min
+    33% v_power_throttle_up
+
+[spaceship_power] v_power_toggle_thrusters  (states: on, off)
+    67% v_power_set_thrusters_off
+    67% v_power_set_thrusters_on
+
+[spaceship_power] v_power_toggle_shields  (states: on, off)
+    67% v_power_set_shields_off
+    67% v_power_set_shields_on
+
+[spaceship_power] v_power_toggle_weapons  (states: on, off)
+    67% v_power_set_weapons_off
+    67% v_power_set_weapons_on
+
+[player] crouch  (states: crouch, stand)
+    50% gp_crouch
+
+[vehicle_general] v_toggle_all_doors  (states: opened, closed)
+    67% v_close_all_doors
+    67% v_open_all_doors
+
+[vehicle_general] v_toggle_all_doorlocks  (states: unlocked, locked)
+    25% v_lock_all_doors
+    25% v_lock_all_ports
+    25% v_unlock_all_doors
+    25% v_unlock_all_ports
+
+[vehicle_general] v_toggle_all_portlocks  (states: unlocked, locked)
+    25% v_lock_all_doors
+    25% v_lock_all_ports
+    25% v_unlock_all_doors
+    25% v_unlock_all_ports
+
+================================================================================
+TOGGLE ACTIONS WITHOUT SIBLINGS (25)
+  (real toggles but no enable/disable actions found via 100% token match)
+================================================================================
+
+[spaceship_movement] v_toggle_relative_mouse_mode  (smart_toggle)
+[spaceship_movement] v_toggle_yaw_roll_swap  (smart_toggle)
+[spaceship_movement] v_lock_rotation  (smart_toggle)
+[spaceship_movement] v_ifcs_toggle_gforce_safety  (states: on, off)
+[spaceship_movement] v_atc_request  (states: takeoff, landing)
+[spaceship_quantum] v_toggle_qdrive_engagement  (states: on, off)
+[spaceship_targeting] v_look_ahead_enable  (smart_toggle)
+[spaceship_targeting] v_look_ahead_start_target_tracking  (smart_toggle)
+[spaceship_targeting] v_target_tracking_auto_zoom  (smart_toggle)
+[spaceship_mining] v_toggle_mining_laser_fire  (smart_toggle)
+[spaceship_salvage] v_salvage_toggle_fire_focused  (smart_toggle)
+[spaceship_salvage] v_salvage_toggle_fire_left  (smart_toggle)
+[spaceship_salvage] v_salvage_toggle_fire_right  (smart_toggle)
+[spaceship_salvage] v_salvage_toggle_fire_fracture  (smart_toggle)
+[spaceship_salvage] v_salvage_toggle_fire_disintegrate  (smart_toggle)
+[turret_movement] turret_gyromode  (states: on, off)
+[lights_controller] v_toggle_running_lights  (smart_toggle)
+[lights_controller] v_toggle_cabin_lights  (smart_toggle)
+[player] prone  (states: prone, stand)
+[player] holster  (states: holstered, equipped, consumable, unarmedcombat)
+[player] toggle_flashlight  (states: on, off)
+[player] toggleEquipHelmet  (states: carried, equipped)
+[player] toggleAttachHelmet  (states: attached, equipped)
+[vehicle_driver] v_lock_rotation  (smart_toggle)
+[vehicle_driver] v_mgv_switch_brake_on_idle  (states: on, off)
+
+================================================================================
+ORPHAN ON/OFF PAIRS (on/off actions without a matching toggle)
+================================================================================
+
+  (on/off suffixes derived from states: ['attach', 'can_dock', 'carri', 'clos', 'consumable', 'crouch', 'deploy', 'disable', 'dock', 'docking', 'enable', 'equip', 'holster', 'landing', 'lock', 'off', 'on', 'open', 'prone', 'retract', 'stand', 'takeoff', 'unarmedcombat', 'unlock'])
+
+[lights_controller]
+  TOGGLE: v_lights  (hidden — no <states> or smart_toggle)
+  ON:  v_lights_on
+  OFF: v_lights_off
+
+[seat_general]
+  TOGGLE: v_light_amplification_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_light_amplification_on
+  OFF: v_light_amplification_off
+
+[spaceship_movement]
+  TOGGLE: v_ifcs_vector_decoupling_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_ifcs_vector_decoupling_on
+  OFF: v_ifcs_vector_decoupling_off
+
+[spaceship_movement]
+  TOGGLE: v_ifcs_speed_limiter_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_ifcs_speed_limiter_on
+  OFF: v_ifcs_speed_limiter_off
+
+[spaceship_movement]
+  ON:  v_ifcs_gsafe_on
+  OFF: v_ifcs_gsafe_off
+
+[spaceship_movement]
+  TOGGLE: v_vtol_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_vtol_on
+  OFF: v_vtol_off
+
+[spaceship_movement]
+  TOGGLE: v_transform_cycle  (hidden — no <states> or smart_toggle)
+  ON:  v_transform_deploy
+  OFF: v_transform_retract
+
+[spaceship_movement]
+  TOGGLE: v_ifcs_gravity_compensation_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_ifcs_gravity_compensation_on
+  OFF: v_ifcs_gravity_compensation_off
+
+[spaceship_movement]
+  TOGGLE: v_ifcs_wind_compensation_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_ifcs_wind_compensation_on
+  OFF: v_ifcs_wind_compensation_off
+
+[spaceship_movement]
+  TOGGLE: v_ifcs_stability_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_ifcs_stability_on
+  OFF: v_ifcs_stability_off
+
+[spaceship_movement]
+  TOGGLE: v_ifcs_command_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_ifcs_command_on
+  OFF: v_ifcs_command_off
+
+[spaceship_movement]
+  TOGGLE: v_ifcs_core_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_ifcs_core_on
+  OFF: v_ifcs_core_off
+
+[spaceship_movement]
+  TOGGLE: v_flight_advanced_hud_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_flight_advanced_hud_on
+  OFF: v_flight_advanced_hud_off
+
+[spaceship_targeting]
+  TOGGLE: v_auto_targeting_toggle_long  (hidden — no <states> or smart_toggle)
+  ON:  v_auto_targeting_enable_short
+  OFF: v_auto_targeting_disable_short
+
+[spaceship_targeting]
+  TOGGLE: v_auto_targeting_toggle_long  (hidden — no <states> or smart_toggle)
+  ON:  v_auto_targeting_enable_long
+  OFF: v_auto_targeting_disable_short
+
+[spaceship_targeting]
+  ON:  v_target_unlock
+  OFF: v_target_toggle_lock_index_1
+
+[spaceship_weapons]
+  TOGGLE: v_weapon_staggered_fire_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_weapon_staggered_fire_on
+  OFF: v_weapon_staggered_fire_off
+
+[spaceship_weapons]
+  TOGGLE: v_weapon_pip_prec_line_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_weapon_pip_prec_line_on
+  OFF: v_weapon_pip_prec_line_off
+
+[spaceship_weapons]
+  TOGGLE: v_weapon_pip_fade_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_weapon_pip_fade_on
+  OFF: v_weapon_pip_fade_off
+
+[spaceship_weapons]
+  TOGGLE: v_weapon_ui_scale_toggle  (hidden — no <states> or smart_toggle)
+  ON:  v_weapon_ui_scale_on
+  OFF: v_weapon_ui_scale_off

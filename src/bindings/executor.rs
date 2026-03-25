@@ -341,6 +341,7 @@ mod tests {
             ui_label: "Test".into(),
             bindings: vec![],
             activation_mode: None,
+            states: vec![],
         };
         let modes = HashMap::new();
 
@@ -361,6 +362,7 @@ mod tests {
             ui_label: "Test".into(),
             bindings: vec![],
             activation_mode: None,
+            states: vec![],
         };
         let modes = HashMap::new();
 
@@ -380,6 +382,7 @@ mod tests {
             ui_label: "Test".into(),
             bindings: vec![],
             activation_mode: None,
+            states: vec![],
         };
         let modes = HashMap::new();
 
@@ -399,6 +402,7 @@ mod tests {
             ui_label: "Test".into(),
             bindings: vec![],
             activation_mode: None,
+            states: vec![],
         };
         let modes = HashMap::new();
 
@@ -420,6 +424,7 @@ mod tests {
             ui_label: "Test".into(),
             bindings: vec![],
             activation_mode: None,
+            states: vec![],
         };
         let modes = HashMap::new();
 
@@ -441,6 +446,7 @@ mod tests {
             ui_label: "Test".into(),
             bindings: vec![],
             activation_mode: Some("hold".to_string()),
+            states: vec![],
         };
         let mut modes = HashMap::new();
         modes.insert(

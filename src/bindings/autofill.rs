@@ -683,12 +683,14 @@ mod tests {
                                 modifiers: vec![],
                             }],
                             activation_mode: None,
+                            states: vec![],
                         },
                         GameAction {
                             name: Arc::from("v_unbound_action"),
                             ui_label: Arc::from("Unbound"),
                             bindings: vec![], // No bindings
                             activation_mode: None,
+                            states: vec![],
                         },
                     ],
                 },
@@ -701,6 +703,7 @@ mod tests {
                         ui_label: Arc::from("FPS Unbound"),
                         bindings: vec![],
                         activation_mode: None,
+                        states: vec![],
                     }],
                 },
             ],

@@ -524,10 +524,122 @@ pub fn render_multiline(cx: &Context, ctx_id: &str, text: &str, style: &KeyStyle
     send_canvas(cx, ctx_id, canvas);
 }
 
+// ── Toggle Rendering ────────────────────────────────────────────────────────────
+
+/// Render a toggle key face with state-dependent colors.
+///
+/// ON:  text in accent color, border in accent (bright, active)
+/// OFF: text in dimmed color, border in dimmed with reduced alpha
+pub fn render_toggle(
+    cx: &Context,
+    ctx_id: &str,
+    text: &str,
+    is_on: bool,
+    style: &KeyStyle,
+    state_index: u8,
+) {
+    let font = resolve_font(style, cx);
+    let mut canvas = Canvas::key_icon();
+
+    let text_color = if is_on { style.accent } else { style.dimmed };
+    let border_color = if is_on {
+        style.accent
+    } else {
+        style.dimmed.with_alpha(80)
+    };
+
+    // Apply text transform + abbreviation (same pipeline as render_label)
+    let text = text.replace("\\n", "\n");
+    let text = match style.text_transform {
+        crate::styles::TextTransform::Uppercase => text.to_uppercase(),
+        crate::styles::TextTransform::None => text,
+    };
+    let text = if style.abbreviate {
+        crate::abbreviations::abbreviate(&text)
+    } else {
+        text
+    };
+
+    let (fill_color, _) = style.fill_and_border();
+    canvas.fill(fill_color);
+
+    // Render text
+    if text.contains('\n') {
+        let raw_lines: Vec<&str> = text.split('\n').collect();
+        let count = raw_lines.len();
+        let chosen_size = auto_scale_all_lines(
+            &font,
+            &raw_lines,
+            style.max_width,
+            style.font_size_max,
+            style.font_size_min,
+            style.font_size_step,
+        );
+        let (first_baseline, line_spacing) =
+            multiline_layout(count, chosen_size, style.line_height);
+        for (i, line_text) in raw_lines.iter().enumerate() {
+            let baseline = first_baseline + i as f32 * line_spacing;
+            let wrapped = wrap_text(
+                &font,
+                chosen_size,
+                line_text,
+                &WrapOptions {
+                    max_width: style.max_width,
+                    max_lines: 1,
+                },
+            );
+            if !wrapped.is_empty() {
+                canvas
+                    .draw_text(
+                        &wrapped,
+                        &TextOptions::new(font.clone(), chosen_size)
+                            .color(text_color)
+                            .v_align(VAlign::Baseline(baseline)),
+                    )
+                    .ok();
+            }
+        }
+    } else {
+        let (chosen_size, lines) = auto_scale(
+            &font,
+            &text,
+            style.max_width,
+            style.max_lines,
+            style.font_size_max,
+            style.font_size_min,
+            style.font_size_step,
+        );
+        if !lines.is_empty() {
+            canvas
+                .draw_text(
+                    &lines,
+                    &TextOptions::new(font, chosen_size).color(text_color),
+                )
+                .ok();
+        }
+    }
+
+    // State-dependent border (override style border color)
+    canvas.draw_border(&BorderStyle::Solid {
+        thickness: 2.0,
+        radius: 12.0,
+        color: border_color,
+    });
+
+    send_canvas_for_state(cx, ctx_id, canvas, state_index);
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
 fn send_canvas(cx: &Context, ctx_id: &str, canvas: Canvas) {
     if let Ok(data_url) = canvas.finish().to_data_url() {
         cx.sd().set_image(ctx_id, Some(data_url), None, None);
+    }
+}
+
+/// Send a rendered canvas targeting a specific Stream Deck state index.
+pub(crate) fn send_canvas_for_state(cx: &Context, ctx_id: &str, canvas: Canvas, state: u8) {
+    if let Ok(data_url) = canvas.finish().to_data_url() {
+        cx.sd().set_image(ctx_id, Some(data_url), Some(state), None);
     }
 }
