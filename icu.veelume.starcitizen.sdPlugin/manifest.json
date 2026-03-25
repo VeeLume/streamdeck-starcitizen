@@ -4,7 +4,7 @@
     "Name": "Star Citizen Tools",
     "CodePath": "bin/icu.veelume.starcitizen.exe",
     "Author": "Veelume",
-    "Version": "0.1.0.0",
+    "Version": "0.2.0.0",
     "Description": "Bridge Star Citizen keybindings with Stream Deck hardware",
     "Icon": "images/plugin",
     "OS": [
