@@ -90,7 +90,7 @@ fn user_styles_dir() -> Option<PathBuf> {
     Some(PathBuf::from(appdata).join(PLUGIN_ID).join("styles"))
 }
 
-/// Load all `.json` files from the user styles directory.
+/// Load all `.toml` files from the user styles directory.
 fn load_user_styles() -> Vec<KeyStyle> {
     let Some(dir) = user_styles_dir() else {
         return Vec::new();
@@ -109,7 +109,15 @@ fn load_user_styles() -> Vec<KeyStyle> {
     let mut styles = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        let ext = path.extension().and_then(|e| e.to_str());
+        if ext == Some("json") {
+            warn!(
+                "Ignoring legacy JSON style {}; convert to TOML (see CHANGELOG)",
+                path.display()
+            );
+            continue;
+        }
+        if ext != Some("toml") {
             continue;
         }
 
@@ -139,6 +147,6 @@ fn load_user_styles() -> Vec<KeyStyle> {
 
 fn load_style_file(path: &std::path::Path) -> anyhow::Result<KeyStyle> {
     let contents = std::fs::read_to_string(path)?;
-    let style: KeyStyle = serde_json::from_str(&contents)?;
+    let style: KeyStyle = toml::from_str(&contents)?;
     Ok(style)
 }

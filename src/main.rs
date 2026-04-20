@@ -4,6 +4,7 @@ mod adapters;
 mod bindings;
 mod discovery;
 mod icons;
+mod labels;
 mod render;
 mod state;
 mod styles;
@@ -16,6 +17,7 @@ use streamdeck_lib::input::InputAdapter;
 use streamdeck_lib::prelude::*;
 use tracing::{info, warn};
 
+use abbreviations::AbbreviationTable;
 use actions::execute_action::ExecuteAction;
 use actions::generate_binds::GenerateBindsAction;
 use actions::manage_version::ManageVersionAction;
@@ -25,6 +27,7 @@ use state::bindings::{BindingsData, BindingsState};
 use state::fonts::FontsState;
 use state::icon_folder::IconFolderState;
 use state::installations::ActiveInstallationState;
+use state::labels::LabelsState;
 use state::styles::StylesState;
 use state::toggle_groups::ToggleGroupsState;
 
@@ -55,8 +58,10 @@ fn main() -> anyhow::Result<()> {
         .set_hooks(hooks)
         .add_extension(Arc::new(ActiveInstallationState::new()))
         .add_extension(Arc::new(BindingsState::new()))
+        .add_extension(Arc::new(AbbreviationTable::load()))
         .add_extension(Arc::new(FontsState::load()))
         .add_extension(Arc::new(IconFolderState::new()))
+        .add_extension(Arc::new(LabelsState::load()))
         .add_extension(Arc::new(StylesState::load()))
         .add_extension(Arc::new(ToggleGroupsState::load()))
         .add_action(ActionFactory::default_of::<ManageVersionAction>())

@@ -12,6 +12,7 @@ use crate::bindings::model::{GameAction, ParsedBindings};
 use crate::render;
 use crate::state::bindings::BindingsState;
 use crate::state::icon_folder::IconFolderState;
+use crate::state::labels::LabelsState;
 use crate::state::styles::StylesState;
 use crate::state::toggle_groups::ToggleGroupsState;
 use crate::topics;
@@ -45,6 +46,7 @@ pub struct ToggleAction {
     off_icon: String,
     key_style: String,
     key_font: String,
+    key_label_mode: String,
     start_on: bool,
     /// When true, the state label mapping is inverted (state[1] = ON, state[0] = OFF).
     states_swapped: bool,
@@ -72,6 +74,7 @@ impl Default for ToggleAction {
             off_icon: String::new(),
             key_style: String::new(),
             key_font: String::new(),
+            key_label_mode: String::new(),
             start_on: false,
             states_swapped: false,
             is_on: false,
@@ -335,6 +338,7 @@ impl Action for ToggleAction {
                 shared::reply_icons(cx, req, &self.toggle_action, &label);
             }
             "getStyles" => shared::reply_styles(cx, req),
+            "getLabelModes" => shared::reply_label_modes(cx, req),
             "getFonts" => shared::reply_fonts(cx, req),
             _ => {}
         }
@@ -396,6 +400,9 @@ impl ToggleAction {
         }
         if let Some(v) = settings.get("keyFont").and_then(|v| v.as_str()) {
             self.key_font = v.to_string();
+        }
+        if let Some(v) = settings.get("keyLabelMode").and_then(|v| v.as_str()) {
+            self.key_label_mode = v.to_string();
         }
         if let Some(v) = settings.get("startOn").and_then(|v| v.as_bool()) {
             self.start_on = v;
@@ -568,16 +575,30 @@ impl ToggleAction {
         if !self.key_font.is_empty() {
             style.font = self.key_font.clone();
         }
+
+        // Resolve label mode — skip pipeline for custom titles
         let custom_title = if is_on {
             &self.on_title
         } else {
             &self.off_title
         };
-        if !custom_title.is_empty() {
-            style.abbreviate = false;
-        }
+        let mode = if !custom_title.is_empty() {
+            crate::labels::mode_none()
+        } else if let Some(labels) = cx.try_ext::<LabelsState>() {
+            let global_default = cx
+                .globals()
+                .get("defaultLabelMode")
+                .and_then(|v| v.as_str().map(String::from));
+            crate::state::labels::resolve_label_mode(
+                &self.key_label_mode,
+                &labels,
+                global_default.as_deref(),
+            )
+        } else {
+            crate::labels::mode_smart()
+        };
 
-        render::render_toggle(cx, ctx_id, &label, is_on, &style, state_index);
+        render::render_toggle(cx, ctx_id, &label, is_on, &style, &mode, state_index);
     }
 
     fn derive_label(&self, cx: &Context, is_on: bool) -> String {
@@ -688,6 +709,7 @@ impl ToggleAction {
         map.insert("offIcon".into(), self.off_icon.clone().into());
         map.insert("keyStyle".into(), self.key_style.clone().into());
         map.insert("keyFont".into(), self.key_font.clone().into());
+        map.insert("keyLabelMode".into(), self.key_label_mode.clone().into());
         map.insert("startOn".into(), self.start_on.into());
         map.insert("statesSwapped".into(), self.states_swapped.into());
         map.insert("isOn".into(), self.is_on.into());

@@ -4,6 +4,8 @@ use streamdeck_render::{
     wrap_text,
 };
 
+use crate::abbreviations::AbbreviationTable;
+use crate::labels::{self, LabelContext, LabelMode};
 use crate::state::fonts::FontsState;
 use crate::styles::KeyStyle;
 
@@ -97,33 +99,35 @@ fn multiline_layout(count: usize, font_size: f32, line_height: f32) -> (f32, f32
 
 // ── Public Rendering Functions ──────────────────────────────────────────────────
 
-/// Render a word-wrapped label on a key icon with the given style.
+/// Render a word-wrapped label on a key icon with the given style and label mode.
 ///
 /// Used by ExecuteAction for action names.  Handles:
 /// - Literal `\n` sequences from PI text fields → actual line breaks
-/// - Text transforms (uppercase) and abbreviation from the style
+/// - Label pipeline (uppercase, abbreviation, replacements, etc.)
 /// - Continuous font auto-scaling to prevent clipping
-pub fn render_label(cx: &Context, ctx_id: &str, text: &str, style: &KeyStyle) {
+pub fn render_label(cx: &Context, ctx_id: &str, text: &str, style: &KeyStyle, mode: &LabelMode) {
     let font = resolve_font(style, cx);
     let mut canvas = Canvas::key_icon();
 
     // 1. Replace literal \n (backslash + n from PI) with real newlines
     let text = text.replace("\\n", "\n");
 
-    // 2. Apply text transform
-    let text = match style.text_transform {
-        crate::styles::TextTransform::Uppercase => text.to_uppercase(),
-        crate::styles::TextTransform::None => text,
+    // 2. Apply label pipeline
+    let abbrevs = cx
+        .try_ext::<AbbreviationTable>()
+        .expect("AbbreviationTable extension not registered");
+    let lctx = LabelContext {
+        abbrevs: &abbrevs,
+        font: &font,
+        max_width: style.max_width,
+        max_lines: style.max_lines,
+        font_size_max: style.font_size_max,
+        font_size_min: style.font_size_min,
+        font_size_step: style.font_size_step,
     };
+    let text = labels::apply(mode, &text, &lctx);
 
-    // 3. Apply abbreviation
-    let text = if style.abbreviate {
-        crate::abbreviations::abbreviate(&text)
-    } else {
-        text
-    };
-
-    // 4. Fill canvas + draw border (before text so Fill borders don't cover it)
+    // 3. Fill canvas + draw border (before text so Fill borders don't cover it)
     let (fill_color, border) = style.fill_and_border();
     canvas.fill(fill_color);
     canvas.draw_border(&border);
@@ -536,6 +540,7 @@ pub fn render_toggle(
     text: &str,
     is_on: bool,
     style: &KeyStyle,
+    mode: &LabelMode,
     state_index: u8,
 ) {
     let font = resolve_font(style, cx);
@@ -548,17 +553,21 @@ pub fn render_toggle(
         style.dimmed.with_alpha(80)
     };
 
-    // Apply text transform + abbreviation (same pipeline as render_label)
+    // Apply label pipeline (same as render_label)
     let text = text.replace("\\n", "\n");
-    let text = match style.text_transform {
-        crate::styles::TextTransform::Uppercase => text.to_uppercase(),
-        crate::styles::TextTransform::None => text,
+    let abbrevs = cx
+        .try_ext::<AbbreviationTable>()
+        .expect("AbbreviationTable extension not registered");
+    let lctx = LabelContext {
+        abbrevs: &abbrevs,
+        font: &font,
+        max_width: style.max_width,
+        max_lines: style.max_lines,
+        font_size_max: style.font_size_max,
+        font_size_min: style.font_size_min,
+        font_size_step: style.font_size_step,
     };
-    let text = if style.abbreviate {
-        crate::abbreviations::abbreviate(&text)
-    } else {
-        text
-    };
+    let text = labels::apply(mode, &text, &lctx);
 
     let (fill_color, _) = style.fill_and_border();
     canvas.fill(fill_color);

@@ -1,23 +1,12 @@
 /// Key icon visual styles.
 ///
 /// A `KeyStyle` describes the complete visual appearance of a rendered key:
-/// background, text colors, border, font sizing, and text transforms.
+/// background, text colors, border, and font sizing.
 ///
 /// Built-in presets (`default`, `sck3`) are always available.  Users can add
-/// custom styles by placing JSON files in `%APPDATA%/icu.veelume.starcitizen/styles/`.
+/// custom styles by placing TOML files in `%APPDATA%/icu.veelume.starcitizen/styles/`.
 use serde::{Deserialize, Serialize};
 use streamdeck_render::{BorderStyle, Color};
-
-// ── Text Transform ───────────────────────────────────────────────────────────
-
-/// Text transformation applied to labels before rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TextTransform {
-    #[default]
-    None,
-    Uppercase,
-}
 
 // ── Border Definition ────────────────────────────────────────────────────────
 
@@ -85,11 +74,6 @@ pub struct KeyStyle {
     /// E.g. `1.4` means baseline spacing = `font_size * 1.4`.
     /// The text block is vertically centered on the canvas.
     pub line_height: f32,
-
-    // ── Text processing ──────────────────────────────────────────────────
-    pub text_transform: TextTransform,
-    /// Apply the abbreviation table before rendering.
-    pub abbreviate: bool,
 
     // ── Font ────────────────────────────────────────────────────────────
     /// Font ID to use (empty = default embedded font).
@@ -165,8 +149,6 @@ pub fn style_default() -> KeyStyle {
         max_lines: 3,
         max_width: 130.0,
         line_height: 1.4,
-        text_transform: TextTransform::None,
-        abbreviate: false,
         font: String::new(),
     }
 }
@@ -192,8 +174,6 @@ pub fn style_sck3() -> KeyStyle {
         max_lines: 3,
         max_width: 120.0, // tighter for rounded corners
         line_height: 1.4,
-        text_transform: TextTransform::Uppercase,
-        abbreviate: true,
         font: String::new(),
     }
 }
@@ -252,8 +232,6 @@ mod tests {
         let json = serde_json::to_string_pretty(&style).unwrap();
         let parsed: KeyStyle = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.id, "sck3");
-        assert!(parsed.abbreviate);
-        assert_eq!(parsed.text_transform, TextTransform::Uppercase);
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::bindings::model::{Binding, Device};
 use crate::state::bindings::BindingsState;
 use crate::state::fonts::FontsState;
 use crate::state::icon_folder::IconFolderState;
+use crate::state::labels::LabelsState;
 use crate::state::styles::StylesState;
 
 // ── Binding resolution ──────────────────────────────────────────────────────────
@@ -146,6 +147,27 @@ pub fn reply_styles(cx: &Context, req: &DataSourceRequest<'_>) {
 
     if let Some(styles) = cx.try_ext::<StylesState>() {
         for (id, name) in styles.list() {
+            items.push(DataSourceResultItem::Item(DataSourceItem {
+                disabled: None,
+                label: Some(name),
+                value: id,
+            }));
+        }
+    }
+
+    cx.sdpi().reply(req, items);
+}
+
+/// Reply to a `getLabelModes` datasource request.
+pub fn reply_label_modes(cx: &Context, req: &DataSourceRequest<'_>) {
+    let mut items = vec![DataSourceResultItem::Item(DataSourceItem {
+        disabled: None,
+        label: Some("\u{2014} global default \u{2014}".to_string()),
+        value: String::new(),
+    })];
+
+    if let Some(labels) = cx.try_ext::<LabelsState>() {
+        for (id, name) in labels.list() {
             items.push(DataSourceResultItem::Item(DataSourceItem {
                 disabled: None,
                 label: Some(name),

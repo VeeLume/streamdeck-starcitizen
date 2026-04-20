@@ -19,6 +19,7 @@ const KEY_AUTO_LOAD: &str = "autoLoadBindings";
 const KEY_AUTO_SELECT: &str = "autoSelectLastLaunched";
 const KEY_ICON_FOLDER: &str = "iconFolder";
 const KEY_DEFAULT_STYLE: &str = "defaultKeyStyle";
+const KEY_DEFAULT_LABEL_MODE: &str = "defaultLabelMode";
 
 // ── Action ──────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ pub struct SettingsAction {
     auto_select_last: bool,
     icon_folder: String,
     default_style: String,
+    default_label_mode: String,
 }
 
 impl Default for SettingsAction {
@@ -36,6 +38,7 @@ impl Default for SettingsAction {
             auto_select_last: false,
             icon_folder: String::new(),
             default_style: String::new(),
+            default_label_mode: String::new(),
         }
     }
 }
@@ -67,11 +70,12 @@ impl Action for SettingsAction {
 
     fn did_receive_settings(&mut self, cx: &Context, ev: &DidReceiveSettings) {
         let old_style = self.default_style.clone();
+        let old_label_mode = self.default_label_mode.clone();
         // PI writes to per-action settings → promote to globals
         self.apply_settings(ev.settings);
         self.promote_to_globals(cx);
         self.handle_icon_folder_change(cx);
-        if self.default_style != old_style {
+        if self.default_style != old_style || self.default_label_mode != old_label_mode {
             cx.bus()
                 .publish_t(topics::STYLE_CHANGED, topics::StyleChanged);
         }
@@ -126,28 +130,34 @@ impl Action for SettingsAction {
     }
 
     fn did_receive_sdpi_request(&mut self, cx: &Context, req: &DataSourceRequest<'_>) {
-        if req.event == "getStyles" {
-            let mut items = vec![DataSourceResultItem::Item(DataSourceItem {
-                disabled: None,
-                label: Some("Default".to_string()),
-                value: String::new(),
-            })];
+        match req.event {
+            "getStyles" => {
+                let mut items = vec![DataSourceResultItem::Item(DataSourceItem {
+                    disabled: None,
+                    label: Some("Default".to_string()),
+                    value: String::new(),
+                })];
 
-            if let Some(styles) = cx.try_ext::<StylesState>() {
-                for (id, name) in styles.list() {
-                    // Skip "default" — the empty-value first item already covers it
-                    if id == "default" {
-                        continue;
+                if let Some(styles) = cx.try_ext::<StylesState>() {
+                    for (id, name) in styles.list() {
+                        // Skip "default" — the empty-value first item already covers it
+                        if id == "default" {
+                            continue;
+                        }
+                        items.push(DataSourceResultItem::Item(DataSourceItem {
+                            disabled: None,
+                            label: Some(name),
+                            value: id,
+                        }));
                     }
-                    items.push(DataSourceResultItem::Item(DataSourceItem {
-                        disabled: None,
-                        label: Some(name),
-                        value: id,
-                    }));
                 }
-            }
 
-            cx.sdpi().reply(req, items);
+                cx.sdpi().reply(req, items);
+            }
+            "getLabelModes" => {
+                super::shared::reply_label_modes(cx, req);
+            }
+            _ => {}
         }
     }
 
@@ -178,6 +188,12 @@ impl SettingsAction {
         if let Some(v) = settings.get(KEY_DEFAULT_STYLE).and_then(|v| v.as_str()) {
             self.default_style = v.to_string();
         }
+        if let Some(v) = settings
+            .get(KEY_DEFAULT_LABEL_MODE)
+            .and_then(|v| v.as_str())
+        {
+            self.default_label_mode = v.to_string();
+        }
     }
 
     fn hydrate_from_globals(&mut self, cx: &Context) {
@@ -200,6 +216,12 @@ impl SettingsAction {
         {
             self.default_style = v;
         }
+        if let Some(v) = globals
+            .get(KEY_DEFAULT_LABEL_MODE)
+            .and_then(|v| v.as_str().map(String::from))
+        {
+            self.default_label_mode = v;
+        }
     }
 
     fn promote_to_globals(&self, cx: &Context) {
@@ -221,21 +243,26 @@ impl SettingsAction {
                 KEY_DEFAULT_STYLE.into(),
                 serde_json::Value::String(self.default_style.clone()),
             );
+            map.insert(
+                KEY_DEFAULT_LABEL_MODE.into(),
+                serde_json::Value::String(self.default_label_mode.clone()),
+            );
         });
     }
 
     /// Sync local state from a global settings map.
-    /// Returns `(icon_folder_changed, style_changed)`.
+    /// Returns `(icon_folder_changed, style_or_label_mode_changed)`.
     fn sync_from_global_map(
         &mut self,
         settings: &serde_json::Map<String, serde_json::Value>,
     ) -> (bool, bool) {
         let old_folder = self.icon_folder.clone();
         let old_style = self.default_style.clone();
+        let old_label_mode = self.default_label_mode.clone();
         self.apply_settings(settings);
         (
             self.icon_folder != old_folder,
-            self.default_style != old_style,
+            self.default_style != old_style || self.default_label_mode != old_label_mode,
         )
     }
 

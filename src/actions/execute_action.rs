@@ -12,6 +12,7 @@ use crate::bindings::model::{GameAction, ParsedBindings};
 use crate::render;
 use crate::state::bindings::BindingsState;
 use crate::state::icon_folder::IconFolderState;
+use crate::state::labels::LabelsState;
 use crate::state::styles::StylesState;
 use crate::topics;
 
@@ -40,6 +41,7 @@ pub struct ExecuteAction {
     icon_file: String,
     key_style: String,
     key_font: String,
+    key_label_mode: String,
 
     // Runtime state for press detection
     key_down_at: Option<Instant>,
@@ -66,6 +68,7 @@ impl Default for ExecuteAction {
             icon_file: String::new(),
             key_style: String::new(),
             key_font: String::new(),
+            key_label_mode: String::new(),
             key_down_at: None,
             last_up_at: None,
             awaiting_double: false,
@@ -318,6 +321,9 @@ impl Action for ExecuteAction {
             "getStyles" => {
                 shared::reply_styles(cx, req);
             }
+            "getLabelModes" => {
+                shared::reply_label_modes(cx, req);
+            }
             "getFonts" => {
                 shared::reply_fonts(cx, req);
             }
@@ -381,6 +387,9 @@ impl ExecuteAction {
         if let Some(v) = settings.get("keyFont").and_then(|v| v.as_str()) {
             self.key_font = v.to_string();
         }
+        if let Some(v) = settings.get("keyLabelMode").and_then(|v| v.as_str()) {
+            self.key_label_mode = v.to_string();
+        }
     }
 
     fn render_button(&self, cx: &Context, ctx_id: &str) {
@@ -429,11 +438,25 @@ impl ExecuteAction {
         if !self.key_font.is_empty() {
             style.font = self.key_font.clone();
         }
-        // Don't abbreviate user-entered custom titles
-        if !self.custom_title.is_empty() {
-            style.abbreviate = false;
-        }
-        render::render_label(cx, ctx_id, &label, &style);
+
+        // Resolve label mode — skip pipeline for custom titles
+        let mode = if !self.custom_title.is_empty() {
+            crate::labels::mode_none()
+        } else if let Some(labels) = cx.try_ext::<LabelsState>() {
+            let global_default = cx
+                .globals()
+                .get("defaultLabelMode")
+                .and_then(|v| v.as_str().map(String::from));
+            crate::state::labels::resolve_label_mode(
+                &self.key_label_mode,
+                &labels,
+                global_default.as_deref(),
+            )
+        } else {
+            crate::labels::mode_smart()
+        };
+
+        render::render_label(cx, ctx_id, &label, &style, &mode);
     }
 
     fn derive_label(&self, cx: &Context) -> String {
