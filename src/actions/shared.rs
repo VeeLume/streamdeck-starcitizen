@@ -7,7 +7,7 @@ use streamdeck_lib::prelude::*;
 
 use crate::bindings::HIDDEN_ACTION_MAPS;
 use crate::bindings::executor::binding_to_combo;
-use crate::bindings::model::{Binding, Device};
+use crate::bindings::model::{Binding, Device, GameAction};
 use crate::state::bindings::BindingsState;
 use crate::state::fonts::FontsState;
 use crate::state::icon_folder::IconFolderState;
@@ -16,7 +16,21 @@ use crate::state::styles::StylesState;
 
 // ── Binding resolution ──────────────────────────────────────────────────────────
 
-/// Look up a game action's keyboard binding and convert it to an `InputCombo`.
+/// Pick the binding to execute for a game action.
+///
+/// Prefers keyboard over mouse: keyboard inputs are unaffected by EAC's
+/// relative-mouse block during aiming, so they're more reliable when both
+/// exist. Returns `None` if the action has no keyboard or mouse binding
+/// (e.g. joystick-only or analog-axis-only actions, which we can't simulate).
+fn pick_executable_binding(action: &GameAction) -> Option<&Binding> {
+    action
+        .bindings
+        .iter()
+        .find(|b| b.device == Device::Keyboard)
+        .or_else(|| action.bindings.iter().find(|b| b.device == Device::Mouse))
+}
+
+/// Look up a game action's executable binding and convert it to an `InputCombo`.
 pub fn resolve_combo(cx: &Context, map_name: &str, action_name: &str) -> Option<InputCombo> {
     let bindings_state = cx.try_ext::<BindingsState>()?;
     bindings_state.with_bindings(|bindings| {
@@ -27,12 +41,8 @@ pub fn resolve_combo(cx: &Context, map_name: &str, action_name: &str) -> Option<
             .flat_map(|m| &m.actions)
             .find(|a| a.name.as_ref() == action_name)?;
 
-        let kb_binding = action
-            .bindings
-            .iter()
-            .find(|b| b.device == Device::Keyboard)?;
-
-        binding_to_combo(kb_binding, &bindings.activation_modes, action)
+        let binding = pick_executable_binding(action)?;
+        binding_to_combo(binding, &bindings.activation_modes, action)
     })?
 }
 
@@ -380,4 +390,78 @@ pub fn resolve_action_label(
         })
         .flatten()
         .unwrap_or_else(|| crate::bindings::translations::humanize_label(action_name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn binding(device: Device, input: &str) -> Binding {
+        Binding {
+            device,
+            input: input.to_string(),
+            modifiers: Vec::new(),
+        }
+    }
+
+    fn action_with(bindings: Vec<Binding>) -> GameAction {
+        GameAction {
+            name: Arc::from("v_test"),
+            ui_label: Arc::from("Test Action"),
+            bindings,
+            activation_mode: None,
+            states: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn pick_binding_prefers_keyboard_over_mouse() {
+        let action = action_with(vec![
+            binding(Device::Mouse, "mouse+button1"),
+            binding(Device::Keyboard, "keyboard+f"),
+        ]);
+        let picked = pick_executable_binding(&action).unwrap();
+        assert_eq!(picked.device, Device::Keyboard);
+    }
+
+    #[test]
+    fn pick_binding_falls_back_to_mouse_when_no_keyboard() {
+        // FPS primary fire: defaults to mouse1, no keyboard binding.
+        let action = action_with(vec![binding(Device::Mouse, "mouse+button1")]);
+        let picked = pick_executable_binding(&action).unwrap();
+        assert_eq!(picked.device, Device::Mouse);
+        assert_eq!(picked.input, "mouse+button1");
+    }
+
+    #[test]
+    fn pick_binding_returns_none_for_joystick_only() {
+        let action = action_with(vec![binding(Device::Joystick, "js1_button3")]);
+        assert!(pick_executable_binding(&action).is_none());
+    }
+
+    #[test]
+    fn pick_binding_returns_none_for_empty_bindings() {
+        let action = action_with(vec![]);
+        assert!(pick_executable_binding(&action).is_none());
+    }
+
+    #[test]
+    fn pick_binding_skips_joystick_for_keyboard() {
+        let action = action_with(vec![
+            binding(Device::Joystick, "js1_button3"),
+            binding(Device::Keyboard, "keyboard+f"),
+        ]);
+        let picked = pick_executable_binding(&action).unwrap();
+        assert_eq!(picked.device, Device::Keyboard);
+    }
+
+    #[test]
+    fn pick_binding_skips_joystick_for_mouse() {
+        let action = action_with(vec![
+            binding(Device::Joystick, "js1_button3"),
+            binding(Device::Mouse, "mouse+button1"),
+        ]);
+        let picked = pick_executable_binding(&action).unwrap();
+        assert_eq!(picked.device, Device::Mouse);
+    }
 }
