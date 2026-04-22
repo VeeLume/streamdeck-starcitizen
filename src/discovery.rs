@@ -213,24 +213,24 @@ fn extract_launch_entry(line: &str) -> Option<(Channel, PathBuf)> {
     Some((channel, PathBuf::from(path_str)))
 }
 
-/// Detect which channel was launched from the process/application name.
+/// Return the channel from the most recent launch entry in the RSI Launcher log.
 ///
-/// The Stream Deck SDK provides the application name (e.g. "StarCitizen.exe").
-/// If the path or name contains PTU/EPTU/HOTFIX/TECH, we can infer the channel.
-pub fn detect_channel_from_app(app_name: &str) -> Option<Channel> {
-    let upper = app_name.to_uppercase();
-    if upper.contains("EPTU") {
-        Some(Channel::Eptu)
-    } else if upper.contains("PTU") {
-        Some(Channel::Ptu)
-    } else if upper.contains("HOTFIX") {
-        Some(Channel::Hotfix)
-    } else if upper.contains("TECHPREVIEW") || upper.contains("TECH-PREVIEW") {
-        Some(Channel::TechPreview)
-    } else {
-        // Default to LIVE — StarCitizen.exe without qualifiers is the LIVE build
-        Some(Channel::Live)
-    }
+/// The launcher writes the "Launching Star Citizen <CHANNEL> from (...)" line
+/// before spawning the game process, so by the time the Stream Deck SDK
+/// delivers `ApplicationDidLaunch`, the last entry in the log is the channel
+/// that was just launched.
+///
+/// Every channel's executable is named `StarCitizen.exe`, so the process name
+/// alone can't distinguish them — this is the authoritative source.
+///
+/// Returns `None` if the log is missing, empty, or contains no launch entries.
+pub fn latest_launched_channel(log_path: &Path) -> Option<Channel> {
+    parse_launcher_log(log_path).last().map(|(ch, _)| *ch)
+}
+
+/// Convenience: `latest_launched_channel` using the default launcher log path.
+pub fn latest_launched_channel_default() -> Option<Channel> {
+    latest_launched_channel(&launcher_log_path())
 }
 
 // ── Discovery orchestrator ───────────────────────────────────────────────────
@@ -405,19 +405,32 @@ mod tests {
     }
 
     #[test]
-    fn detect_channel_from_app_name() {
-        assert_eq!(
-            detect_channel_from_app("StarCitizen.exe"),
-            Some(Channel::Live)
-        );
-        assert_eq!(
-            detect_channel_from_app("StarCitizen_PTU.exe"),
-            Some(Channel::Ptu)
-        );
-        assert_eq!(
-            detect_channel_from_app("StarCitizen_EPTU.exe"),
-            Some(Channel::Eptu)
-        );
+    fn latest_launched_channel_picks_last_entry() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            tmp,
+            r#"{{ "t":"...", "[main][info] ": "Launching Star Citizen LIVE from (C:\\SC\\LIVE)" }},"#
+        )
+        .unwrap();
+        writeln!(
+            tmp,
+            r#"{{ "t":"...", "[main][info] ": "Launching Star Citizen PTU from (C:\\SC\\PTU)" }},"#
+        )
+        .unwrap();
+
+        assert_eq!(latest_launched_channel(tmp.path()), Some(Channel::Ptu));
+    }
+
+    #[test]
+    fn latest_launched_channel_returns_none_when_empty() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        assert_eq!(latest_launched_channel(tmp.path()), None);
+    }
+
+    #[test]
+    fn latest_launched_channel_returns_none_when_missing() {
+        let path = PathBuf::from("C:\\definitely\\not\\a\\real\\path\\log.log");
+        assert_eq!(latest_launched_channel(&path), None);
     }
 
     #[test]

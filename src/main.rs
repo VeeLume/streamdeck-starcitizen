@@ -117,8 +117,10 @@ fn on_startup(cx: &Context) {
 fn on_game_launch(cx: &Context, app: &str) {
     info!("StarCitizen launched: {app}");
 
-    // Detect channel from the executable name
-    let channel = discovery::detect_channel_from_app(app);
+    // All channels ship as `StarCitizen.exe`, so the process name can't
+    // distinguish them. The RSI Launcher writes the launch channel to its log
+    // before spawning the game, so the latest launch entry is authoritative.
+    let channel = discovery::latest_launched_channel_default();
 
     // Record last launched channel
     if let (Some(ch), Some(state)) = (channel, cx.try_ext::<ActiveInstallationState>()) {
