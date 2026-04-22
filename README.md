@@ -19,6 +19,23 @@ Built with Rust and [`streamdeck-lib`](https://github.com/veelume/streamdeck-lib
 2. Double-click — the Stream Deck app installs it automatically.
 3. Find the **Star Citizen** category in the action list.
 
+## Known limitations
+
+- **Run Stream Deck as administrator if button presses don't register.** When
+  Star Citizen runs elevated but Stream Deck does not, Windows blocks input
+  injection into the game (UIPI). Right-click the Stream Deck desktop app and
+  choose "Run as administrator", then relaunch.
+- **Mouse-bound actions may not register while aiming.** EasyAntiCheat blocks
+  synthetic mouse-button events when Star Citizen is in relative-mouse mode
+  (actively aiming, mouse-look, etc.). Prefer keyboard bindings for actions
+  you need during combat. Keyboard input is unaffected.
+- **Keyboard-only execution.** Joystick and gamepad bindings are parsed but
+  can't be fired from a Stream Deck button — only keyboard and mouse inputs
+  can be simulated. Use `Generate Binds` to add keyboard shortcuts to actions
+  that only have analog defaults.
+- **Windows only.** The plugin binary targets Windows and reads
+  Windows-specific paths (RSI Launcher logs, `%APPDATA%`).
+
 ## Build (Developers)
 
 **Prerequisites:** Rust (stable), [Elgato CLI](https://docs.elgato.com/streamdeck/sdk/introduction/getting-started) (`npm install -g @elgato/cli`).
