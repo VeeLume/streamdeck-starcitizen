@@ -1,4 +1,8 @@
-//! Generate `toggle-groups.toml` from a Star Citizen installation.
+//! Developer tool: build a discovery report for toggle groups in Star Citizen.
+//!
+//! Not shipped with the plugin — run from the repo via `cargo run`. The report
+//! is a developer aid for hand-curating `toggle-groups.toml`; it never writes
+//! into the `.sdPlugin` directory.
 //!
 //! Identifies toggle actions using two XML signals:
 //! - `<states>` child elements (explicit on/off, locked/unlocked, etc.)
@@ -8,10 +12,13 @@
 //! Then finds enable/disable siblings via token overlap within the same actionmap.
 //!
 //! Usage:
-//!   toggle-groups-gen.exe                    # auto-discover LIVE installation
-//!   toggle-groups-gen.exe "path/to/Data.p4k" # explicit path
+//!   cargo run --bin report-builder                       # auto-discover LIVE
+//!   cargo run --bin report-builder -- <p4k-or-dir>       # explicit install path
+//!   cargo run --bin report-builder -- --out <toml-path>  # custom output path
+//!
+//! Default outputs are written to `<repo-root>/reports/`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -25,7 +32,8 @@ use streamdeck_starcitizen::discovery::{self, Channel};
 
 struct ToggleGroup {
     map: String,
-    toggle: String,
+    /// Toggle action name; `None` for orphan on/off pairs without a toggle sibling.
+    toggle: Option<String>,
     on: Option<String>,
     off: Option<String>,
     /// All sibling candidates: (name, score, role).
@@ -118,6 +126,9 @@ fn find_siblings(
         if other.name == toggle.name || is_toggle_action(other) {
             continue;
         }
+        if is_disqualified_sibling(&other.name) {
+            continue;
+        }
         let other_tokens = tokenize(&other.name);
         if other_tokens.is_empty() {
             continue;
@@ -159,8 +170,63 @@ fn find_siblings(
 
 /// On/off suffix words used to strip from action names when reverse-searching.
 const ON_OFF_SUFFIXES: &[&str] = &[
-    "on", "off", "enable", "disable", "open", "close", "lock", "unlock", "deploy", "retract",
+    "on",
+    "off",
+    "enable",
+    "disable",
+    "open",
+    "close",
+    "lock",
+    "unlock",
+    "deploy",
+    "retract",
+    "engage",
+    "disengage",
+    "arm",
+    "disarm",
+    "activate",
+    "deactivate",
+    "raise",
+    "lower",
+    "mount",
+    "dismount",
+    "equip",
+    "holster",
+    "extend",
+    "contract",
 ];
+
+/// Suffixes that mark an action as an activation/directional variant rather
+/// than an idempotent enable/disable. Names ending in these are never accepted
+/// as on/off siblings of a toggle.
+const DISQUALIFIED_SIBLING_SUFFIXES: &[&str] = &[
+    "_hold",
+    "_cycle",
+    "_short",
+    "_long",
+    "_press",
+    "_tap",
+    "_up",
+    "_down",
+    "_increase",
+    "_decrease",
+    "_increment",
+    "_decrement",
+    "_max",
+    "_min",
+    "_abs",
+    "_rel",
+    "_button",
+    "_wheel",
+    "_analog",
+];
+
+fn is_disqualified_sibling(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    DISQUALIFIED_SIBLING_SUFFIXES
+        .iter()
+        .any(|s| lower.ends_with(s))
+}
 
 fn classify_sibling(name: &str) -> Option<&'static str> {
     let lower = name.to_lowercase();
@@ -170,6 +236,13 @@ fn classify_sibling(name: &str) -> Option<&'static str> {
         || lower.ends_with("_open")
         || lower.ends_with("_unlock")
         || lower.ends_with("_deploy")
+        || lower.ends_with("_engage")
+        || lower.ends_with("_arm")
+        || lower.ends_with("_activate")
+        || lower.ends_with("_raise")
+        || lower.ends_with("_mount")
+        || lower.ends_with("_equip")
+        || lower.ends_with("_extend")
     {
         return Some("on");
     }
@@ -179,6 +252,13 @@ fn classify_sibling(name: &str) -> Option<&'static str> {
         || lower.ends_with("_close")
         || lower.ends_with("_lock")
         || lower.ends_with("_retract")
+        || lower.ends_with("_disengage")
+        || lower.ends_with("_disarm")
+        || lower.ends_with("_deactivate")
+        || lower.ends_with("_lower")
+        || lower.ends_with("_dismount")
+        || lower.ends_with("_holster")
+        || lower.ends_with("_contract")
     {
         return Some("off");
     }
@@ -242,7 +322,15 @@ fn discover_groups(bindings: &ParsedBindings) -> Vec<ToggleGroup> {
             let mut on_action = None;
             let mut off_action = None;
 
-            for (sib_name, _score, role) in &siblings {
+            // Only auto-pick siblings with strong overlap. Below this we keep
+            // them as `# alt` candidates so the curator can see them, but we
+            // don't claim them — they're more likely to be wrong than right.
+            const AUTO_PICK_THRESHOLD: f64 = 0.5;
+
+            for (sib_name, score, role) in &siblings {
+                if *score < AUTO_PICK_THRESHOLD {
+                    continue;
+                }
                 match (*role, on_action.is_none(), off_action.is_none()) {
                     ("on", true, _) => {
                         on_action = Some(sib_name.clone());
@@ -259,7 +347,7 @@ fn discover_groups(bindings: &ParsedBindings) -> Vec<ToggleGroup> {
             claimed.insert(action.name.to_string());
             groups.push(ToggleGroup {
                 map: map.name.to_string(),
-                toggle: action.name.to_string(),
+                toggle: Some(action.name.to_string()),
                 on: on_action,
                 off: off_action,
                 candidates: siblings,
@@ -282,6 +370,7 @@ fn discover_groups(bindings: &ParsedBindings) -> Vec<ToggleGroup> {
                 !claimed.contains(a.name.as_ref())
                     && classify_sibling(&a.name) == Some("on")
                     && !is_redundant_variant(&a.name, &map_action_names)
+                    && !is_disqualified_sibling(&a.name)
             })
             .collect();
 
@@ -292,6 +381,7 @@ fn discover_groups(bindings: &ParsedBindings) -> Vec<ToggleGroup> {
                 !claimed.contains(a.name.as_ref())
                     && classify_sibling(&a.name) == Some("off")
                     && !is_redundant_variant(&a.name, &map_action_names)
+                    && !is_disqualified_sibling(&a.name)
             })
             .collect();
 
@@ -330,7 +420,9 @@ fn discover_groups(bindings: &ParsedBindings) -> Vec<ToggleGroup> {
                 }
             }
 
-            if best_score < 0.8 {
+            // Emit any reasonable token-overlap match. The score is shown in
+            // the report comment so the curator can judge weak matches.
+            if best_score < 0.6 {
                 continue;
             }
             let off_a = match best_off {
@@ -362,17 +454,13 @@ fn discover_groups(bindings: &ParsedBindings) -> Vec<ToggleGroup> {
             claimed.insert(on_a.name.to_string());
             claimed.insert(off_a.name.to_string());
 
-            // If no toggle found, use the on action name as a placeholder group key
-            let toggle = if toggle_name.is_empty() {
-                // No toggle found — still create the group with just on/off
-                format!("# no toggle found for {}", on_a.name)
-            } else {
-                toggle_name
-            };
-
             groups.push(ToggleGroup {
                 map: map.name.to_string(),
-                toggle,
+                toggle: if toggle_name.is_empty() {
+                    None
+                } else {
+                    Some(toggle_name)
+                },
                 on: Some(on_a.name.to_string()),
                 off: Some(off_a.name.to_string()),
                 candidates: vec![],
@@ -385,16 +473,52 @@ fn discover_groups(bindings: &ParsedBindings) -> Vec<ToggleGroup> {
 
 // ── TOML output ─────────────────────────────────────────────────────────────────
 
-fn write_toml(groups: &[ToggleGroup], out: &mut dyn Write) -> std::io::Result<()> {
-    writeln!(out, "# Toggle group definitions for Star Citizen.")?;
+fn write_toml(
+    groups: &[ToggleGroup],
+    bindings: &ParsedBindings,
+    out: &mut dyn Write,
+) -> std::io::Result<()> {
+    writeln!(out, "# Toggle groups discovery report.")?;
     writeln!(
         out,
-        "# Generated by toggle-groups-gen.exe — review and hand-curate as needed."
+        "# Generated by `cargo run --bin report-builder` from defaultProfile.xml."
     )?;
     writeln!(
         out,
-        "# Re-run after SC updates to pick up new toggle actions."
+        "# Use this report as input when hand-curating icu.veelume.starcitizen.sdPlugin/toggle-groups.toml."
     )?;
+    writeln!(out)?;
+    writeln!(out, "# Schema:")?;
+    writeln!(
+        out,
+        "#   id           required, stable slug used as the saved setting"
+    )?;
+    writeln!(
+        out,
+        "#   name         required, label shown in the PI dropdown"
+    )?;
+    writeln!(
+        out,
+        "#   description  optional, tooltip shown under the dropdown"
+    )?;
+    writeln!(
+        out,
+        "#   map          required, action map containing the binding"
+    )?;
+    writeln!(out, "#   toggle       optional, toggle action name")?;
+    writeln!(
+        out,
+        "#   on / off     optional, idempotent enable/disable actions"
+    )?;
+    writeln!(
+        out,
+        "#   label_on     optional, button label when state is ON"
+    )?;
+    writeln!(
+        out,
+        "#   label_off    optional, button label when state is OFF"
+    )?;
+    writeln!(out, "#   start_on     optional bool (default false)")?;
     writeln!(out)?;
 
     let mut current_map = "";
@@ -408,29 +532,36 @@ fn write_toml(groups: &[ToggleGroup], out: &mut dyn Write) -> std::io::Result<()
             current_map = &g.map;
         }
 
-        if g.toggle.starts_with('#') {
-            // Comment-only entry (no toggle found)
-            writeln!(out, "{}", g.toggle)?;
-            if let Some(ref on) = g.on {
-                writeln!(out, "# on = \"{}\"", on)?;
-            }
-            if let Some(ref off) = g.off {
-                writeln!(out, "# off = \"{}\"", off)?;
-            }
-            writeln!(out)?;
-            continue;
-        }
+        let primary = g
+            .toggle
+            .as_deref()
+            .or(g.on.as_deref())
+            .or(g.off.as_deref())
+            .unwrap_or("?");
+        let id = format!("{}.{}", g.map, primary);
+        let derived_name =
+            derive_group_name(bindings, &g.map, g.toggle.as_deref(), g.on.as_deref());
+
+        // Action context as comments — gives the curator everything they need
+        // to confirm/rename without cross-referencing the XML.
+        write_action_comment(out, "toggle", bindings, &g.map, g.toggle.as_deref())?;
+        write_action_comment(out, "on    ", bindings, &g.map, g.on.as_deref())?;
+        write_action_comment(out, "off   ", bindings, &g.map, g.off.as_deref())?;
 
         writeln!(out, "[[group]]")?;
+        writeln!(out, "id = \"{id}\"")?;
+        writeln!(out, "name = \"{}\"", escape_toml(&derived_name))?;
         writeln!(out, "map = \"{}\"", g.map)?;
-        writeln!(out, "toggle = \"{}\"", g.toggle)?;
+        if let Some(ref t) = g.toggle {
+            writeln!(out, "toggle = \"{t}\"")?;
+        }
         if let Some(ref on) = g.on {
-            writeln!(out, "on = \"{}\"", on)?;
+            writeln!(out, "on = \"{on}\"")?;
         }
         if let Some(ref off) = g.off {
-            writeln!(out, "off = \"{}\"", off)?;
+            writeln!(out, "off = \"{off}\"")?;
         }
-        // Show sibling candidates as commented-out on/off lines (helps curation)
+        // Show un-picked sibling candidates as comments to help curation
         if !g.candidates.is_empty() {
             let picked: HashSet<&str> = [
                 g.on.as_deref().unwrap_or(""),
@@ -444,10 +575,8 @@ fn write_toml(groups: &[ToggleGroup], out: &mut dyn Write) -> std::io::Result<()
                 .iter()
                 .filter(|(name, _, _)| !picked.contains(name.as_str()))
                 .collect();
-            if !unpicked.is_empty() {
-                for (name, score, role) in &unpicked {
-                    writeln!(out, "# {role} = \"{name}\" # {:.0}%", score * 100.0)?;
-                }
+            for (name, score, role) in &unpicked {
+                writeln!(out, "# alt {role} = \"{name}\" # {:.0}%", score * 100.0)?;
             }
         }
         writeln!(out)?;
@@ -456,254 +585,131 @@ fn write_toml(groups: &[ToggleGroup], out: &mut dyn Write) -> std::io::Result<()
     Ok(())
 }
 
-// ── Diff against existing TOML ──────────────────────────────────────────────────
-
-/// TOML schema for reading an existing toggle-groups.toml.
-#[derive(Debug, Clone, serde::Deserialize)]
-struct ExistingGroup {
-    map: String,
-    toggle: String,
-    on: Option<String>,
-    off: Option<String>,
-}
-
-#[derive(Debug, Default, serde::Deserialize)]
-struct ExistingFile {
-    #[serde(default)]
-    group: Vec<ExistingGroup>,
-}
-
-fn load_existing(path: &std::path::Path) -> Vec<ExistingGroup> {
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return vec![];
-    };
-    toml::from_str::<ExistingFile>(&content)
-        .map(|f| f.group)
-        .unwrap_or_default()
-}
-
-struct Diff {
-    added: Vec<ToggleGroup>,
-    removed: Vec<ExistingGroup>,
-    changed: Vec<ChangedGroup>,
-}
-
-struct ChangedGroup {
-    map: String,
-    toggle: String,
-    old_on: Option<String>,
-    old_off: Option<String>,
-    new_on: Option<String>,
-    new_off: Option<String>,
-    candidates: Vec<(String, f64, &'static str)>,
-}
-
-fn compute_diff(existing: &[ExistingGroup], discovered: &[ToggleGroup]) -> Diff {
-    let existing_keys: HashMap<String, &ExistingGroup> = existing
+/// Look up an action by name in a map and return it.
+fn find_action<'a>(
+    bindings: &'a ParsedBindings,
+    map_name: &str,
+    action_name: &str,
+) -> Option<&'a GameAction> {
+    bindings
+        .action_maps
         .iter()
-        .map(|g| (format!("{}.{}", g.map, g.toggle), g))
-        .collect();
-
-    let discovered_keys: HashMap<String, &ToggleGroup> = discovered
+        .find(|m| m.name.as_ref() == map_name)?
+        .actions
         .iter()
-        .filter(|g| !g.toggle.starts_with('#'))
-        .map(|g| (format!("{}.{}", g.map, g.toggle), g))
-        .collect();
-
-    let mut added = Vec::new();
-    let mut changed = Vec::new();
-
-    for (key, dg) in &discovered_keys {
-        match existing_keys.get(key) {
-            None => {
-                added.push(ToggleGroup {
-                    map: dg.map.clone(),
-                    toggle: dg.toggle.clone(),
-                    on: dg.on.clone(),
-                    off: dg.off.clone(),
-                    candidates: dg.candidates.clone(),
-                });
-            }
-            Some(eg) => {
-                // Check if auto-detected siblings differ
-                let on_changed = dg.on.is_some() && dg.on != eg.on && eg.on.is_none();
-                let off_changed = dg.off.is_some() && dg.off != eg.off && eg.off.is_none();
-                if on_changed || off_changed {
-                    changed.push(ChangedGroup {
-                        map: dg.map.clone(),
-                        toggle: dg.toggle.clone(),
-                        old_on: eg.on.clone(),
-                        old_off: eg.off.clone(),
-                        new_on: dg.on.clone(),
-                        new_off: dg.off.clone(),
-                        candidates: dg.candidates.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    let removed: Vec<_> = existing
-        .iter()
-        .filter(|eg| {
-            let key = format!("{}.{}", eg.map, eg.toggle);
-            !discovered_keys.contains_key(&key)
-        })
-        .cloned()
-        .collect();
-
-    Diff {
-        added,
-        removed,
-        changed,
-    }
+        .find(|a| a.name.as_ref() == action_name)
 }
 
-fn write_diff(diff: &Diff, out: &mut dyn Write) -> std::io::Result<()> {
-    writeln!(out, "# Toggle Groups Diff")?;
-    writeln!(
-        out,
-        "# Generated by toggle-groups-gen.exe against existing toggle-groups.toml"
-    )?;
-    writeln!(
-        out,
-        "# Review and apply changes to toggle-groups.toml as needed."
-    )?;
-    writeln!(out)?;
-
-    if diff.added.is_empty() && diff.removed.is_empty() && diff.changed.is_empty() {
-        writeln!(
-            out,
-            "# No changes detected — toggle-groups.toml is up to date."
-        )?;
+/// Write a `# <slot> "<name>" — <ui_label> [states: ...] [activation: ...]` line.
+fn write_action_comment(
+    out: &mut dyn Write,
+    slot: &str,
+    bindings: &ParsedBindings,
+    map_name: &str,
+    action_name: Option<&str>,
+) -> std::io::Result<()> {
+    let Some(name) = action_name else {
         return Ok(());
+    };
+    let Some(action) = find_action(bindings, map_name, name) else {
+        writeln!(out, "# {slot} \"{name}\" — (action not found in map)")?;
+        return Ok(());
+    };
+
+    let mut suffix = String::new();
+    if !action.states.is_empty() {
+        let states: Vec<&str> = action.states.iter().map(|s| s.name.as_str()).collect();
+        suffix.push_str(&format!(" [states: {}]", states.join("/")));
+    }
+    if let Some(ref am) = action.activation_mode {
+        suffix.push_str(&format!(" [activation: {am}]"));
     }
 
-    // Added
-    if !diff.added.is_empty() {
-        writeln!(
-            out,
-            "# ══ NEW ({count}) — found in SC but not in existing TOML ══",
-            count = diff.added.len()
-        )?;
-        writeln!(
-            out,
-            "# Copy these [[group]] entries into toggle-groups.toml if desired."
-        )?;
-        writeln!(out)?;
-
-        for g in &diff.added {
-            writeln!(out, "[[group]]")?;
-            writeln!(out, "map = \"{}\"", g.map)?;
-            writeln!(out, "toggle = \"{}\"", g.toggle)?;
-            if let Some(ref on) = g.on {
-                writeln!(out, "on = \"{}\"", on)?;
-            }
-            if let Some(ref off) = g.off {
-                writeln!(out, "off = \"{}\"", off)?;
-            }
-            if !g.candidates.is_empty() {
-                let picked: HashSet<&str> = [
-                    g.on.as_deref().unwrap_or(""),
-                    g.off.as_deref().unwrap_or(""),
-                ]
-                .into_iter()
-                .filter(|s| !s.is_empty())
-                .collect();
-                let unpicked: Vec<_> = g
-                    .candidates
-                    .iter()
-                    .filter(|(name, _, _)| !picked.contains(name.as_str()))
-                    .collect();
-                if !unpicked.is_empty() {
-                    for (name, score, role) in &unpicked {
-                        writeln!(out, "# {role} = \"{name}\" # {:.0}%", score * 100.0)?;
-                    }
-                }
-            }
-            writeln!(out)?;
-        }
-    }
-
-    // Removed
-    if !diff.removed.is_empty() {
-        writeln!(out)?;
-        writeln!(
-            out,
-            "# ══ REMOVED ({count}) — in existing TOML but no longer in SC ══",
-            count = diff.removed.len()
-        )?;
-        writeln!(
-            out,
-            "# These actions no longer exist in defaultProfile.xml."
-        )?;
-        writeln!(out, "# Consider removing them from toggle-groups.toml.")?;
-        writeln!(out)?;
-
-        for g in &diff.removed {
-            writeln!(out, "# map = \"{}\"", g.map)?;
-            writeln!(out, "# toggle = \"{}\"", g.toggle)?;
-            if let Some(ref on) = g.on {
-                writeln!(out, "# on = \"{}\"", on)?;
-            }
-            if let Some(ref off) = g.off {
-                writeln!(out, "# off = \"{}\"", off)?;
-            }
-            writeln!(out)?;
-        }
-    }
-
-    // Changed
-    if !diff.changed.is_empty() {
-        writeln!(out)?;
-        writeln!(
-            out,
-            "# ══ CHANGED ({count}) — new siblings detected ══",
-            count = diff.changed.len()
-        )?;
-        writeln!(
-            out,
-            "# These groups exist in the TOML but the generator found new on/off siblings."
-        )?;
-        writeln!(out)?;
-
-        for c in &diff.changed {
-            writeln!(out, "# [{}.{}]", c.map, c.toggle)?;
-            if let Some(ref old) = c.old_on {
-                writeln!(out, "#   existing on  = \"{}\"", old)?;
-            }
-            if let Some(ref new) = c.new_on {
-                if c.old_on.is_none() {
-                    writeln!(out, "#   detected on  = \"{}\"  (currently not set)", new)?;
-                }
-            }
-            if let Some(ref old) = c.old_off {
-                writeln!(out, "#   existing off = \"{}\"", old)?;
-            }
-            if let Some(ref new) = c.new_off {
-                if c.old_off.is_none() {
-                    writeln!(out, "#   detected off = \"{}\"  (currently not set)", new)?;
-                }
-            }
-            if !c.candidates.is_empty() {
-                for (name, score, role) in &c.candidates {
-                    writeln!(out, "#   {role} = \"{name}\" # {:.0}%", score * 100.0)?;
-                }
-            }
-            writeln!(out)?;
-        }
-    }
-
+    writeln!(out, "# {slot} \"{name}\" — {}{}", action.ui_label, suffix)?;
     Ok(())
+}
+
+/// Derive a default `name` for the dropdown from the toggle (or on) action's ui_label.
+fn derive_group_name(
+    bindings: &ParsedBindings,
+    map_name: &str,
+    toggle: Option<&str>,
+    on: Option<&str>,
+) -> String {
+    let action_name = toggle.or(on).unwrap_or("");
+    let Some(action) = find_action(bindings, map_name, action_name) else {
+        return action_name.replace('_', " ");
+    };
+
+    let label = action.ui_label.as_ref();
+    // Strip common toggle/set verbs from the start so the name reads as a noun.
+    for prefix in [
+        "Toggle ",
+        "Set ",
+        "Enable ",
+        "Disable ",
+        "Activate ",
+        "Deactivate ",
+    ] {
+        if let Some(rest) = label.strip_prefix(prefix) {
+            return rest.to_string();
+        }
+    }
+    label.to_string()
+}
+
+/// Escape `"` and `\` for inclusion in a TOML basic string.
+fn escape_toml(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────────
 
-fn resolve_install_path() -> Result<PathBuf> {
-    let arg = std::env::args().nth(1);
+struct Args {
+    install_path: Option<String>,
+    out_path: Option<PathBuf>,
+}
 
+fn parse_args() -> Result<Args> {
+    let mut install_path = None;
+    let mut out_path = None;
+    let mut iter = std::env::args().skip(1);
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--out" | "-o" => {
+                let v = iter.next().context("--out requires a path argument")?;
+                out_path = Some(PathBuf::from(v));
+            }
+            "-h" | "--help" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            _ if arg.starts_with("--") => bail!("Unknown flag: {arg}"),
+            _ if install_path.is_none() => install_path = Some(arg),
+            _ => bail!("Unexpected positional argument: {arg}"),
+        }
+    }
+    Ok(Args {
+        install_path,
+        out_path,
+    })
+}
+
+fn print_usage() {
+    println!(
+        "Usage: cargo run --bin report-builder [-- <install-or-p4k-path>] [--out <toml>]\n\
+         \n\
+         Without arguments, auto-discovers the LIVE installation and writes the\n\
+         report to <repo-root>/reports/toggle-groups-report.toml.\n\
+         \n\
+         The report never overwrites the curated toggle-groups.toml inside the\n\
+         .sdPlugin directory — hand-curate that file using the report as input."
+    );
+}
+
+fn resolve_install_path(arg: Option<&str>) -> Result<PathBuf> {
     match arg {
-        Some(ref path) => {
+        Some(path) => {
             let p = PathBuf::from(path);
             if p.is_file() && path.ends_with("Data.p4k") {
                 Ok(p.parent()
@@ -721,7 +727,7 @@ fn resolve_install_path() -> Result<PathBuf> {
             if installations.is_empty() {
                 bail!(
                     "No Star Citizen installations found.\n\
-                     Pass a path manually: toggle-groups-gen.exe \"C:\\path\\to\\LIVE\""
+                     Pass a path manually: cargo run --bin report-builder -- \"C:\\path\\to\\LIVE\""
                 );
             }
 
@@ -740,8 +746,32 @@ fn resolve_install_path() -> Result<PathBuf> {
     }
 }
 
+/// Walk up from CWD to find the repo root (directory containing `Cargo.toml`).
+fn find_repo_root() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut probe = cwd.as_path();
+    loop {
+        if probe.join("Cargo.toml").is_file() {
+            return probe.to_path_buf();
+        }
+        match probe.parent() {
+            Some(parent) => probe = parent,
+            None => break,
+        }
+    }
+    cwd
+}
+
+/// Default report output: `<repo-root>/reports/toggle-groups-report.toml`.
+fn default_report_path() -> PathBuf {
+    find_repo_root()
+        .join("reports")
+        .join("toggle-groups-report.toml")
+}
+
 fn run() -> Result<()> {
-    let install_path = resolve_install_path()?;
+    let args = parse_args()?;
+    let install_path = resolve_install_path(args.install_path.as_deref())?;
 
     println!("Loading bindings from {}...", install_path.display());
     let bindings = streamdeck_starcitizen::bindings::load_bindings_defaults_only(&install_path)
@@ -755,82 +785,36 @@ fn run() -> Result<()> {
 
     let groups = discover_groups(&bindings);
 
-    // The binary lives at .sdPlugin/bin/, the TOML at .sdPlugin/ (one level up)
-    let plugin_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf())) // bin/
-        .and_then(|p| p.parent().map(|p| p.to_path_buf())) // .sdPlugin/
-        .unwrap_or_else(|| PathBuf::from("."));
-
-    let existing_path = plugin_dir.join("toggle-groups.toml");
-    let existing = load_existing(&existing_path);
-
-    if existing.is_empty() {
-        // No existing file → full generation mode
-        let out_path = plugin_dir.join("toggle-groups.toml");
-        let mut file = std::fs::File::create(&out_path)
-            .with_context(|| format!("Failed to create {}", out_path.display()))?;
-        write_toml(&groups, &mut file)?;
-
-        let with_siblings = groups
-            .iter()
-            .filter(|g| g.on.is_some() || g.off.is_some())
-            .count();
-        let toggle_only = groups.len() - with_siblings;
-
-        println!();
-        println!("Wrote {}", out_path.display());
-        println!(
-            "  {} groups total ({} with enable/disable, {} toggle-only)",
-            groups.len(),
-            with_siblings,
-            toggle_only
-        );
-    } else {
-        // Existing file found → diff mode
-        println!(
-            "Found existing {} ({} groups)",
-            existing_path.display(),
-            existing.len()
-        );
-
-        let diff = compute_diff(&existing, &groups);
-        let out_path = plugin_dir.join("toggle-groups-diff.toml");
-
-        let mut file = std::fs::File::create(&out_path)
-            .with_context(|| format!("Failed to create {}", out_path.display()))?;
-        write_diff(&diff, &mut file)?;
-
-        println!();
-        println!("Wrote {}", out_path.display());
-        println!(
-            "  {} new, {} removed, {} changed",
-            diff.added.len(),
-            diff.removed.len(),
-            diff.changed.len()
-        );
-
-        if diff.added.is_empty() && diff.removed.is_empty() && diff.changed.is_empty() {
-            println!("  toggle-groups.toml is up to date!");
-        }
+    let report_path = args.out_path.clone().unwrap_or_else(default_report_path);
+    if let Some(parent) = report_path.parent() {
+        std::fs::create_dir_all(parent).ok();
     }
+
+    let mut file = std::fs::File::create(&report_path)
+        .with_context(|| format!("Failed to create {}", report_path.display()))?;
+    write_toml(&groups, &bindings, &mut file)?;
+
+    let with_siblings = groups
+        .iter()
+        .filter(|g| g.on.is_some() || g.off.is_some())
+        .count();
+    let toggle_only = groups.len() - with_siblings;
+
+    println!();
+    println!("Wrote {}", report_path.display());
+    println!(
+        "  {} groups total ({} with enable/disable, {} toggle-only)",
+        groups.len(),
+        with_siblings,
+        toggle_only
+    );
 
     Ok(())
 }
 
 fn main() {
-    match run() {
-        Ok(()) => {}
-        Err(e) => {
-            eprintln!("Error: {e:#}");
-            std::process::exit(1);
-        }
-    }
-
-    // Pause so double-click users can read the output
-    if std::env::args().len() <= 1 {
-        println!();
-        println!("Press Enter to exit...");
-        let _ = std::io::stdin().read_line(&mut String::new());
+    if let Err(e) = run() {
+        eprintln!("Error: {e:#}");
+        std::process::exit(1);
     }
 }

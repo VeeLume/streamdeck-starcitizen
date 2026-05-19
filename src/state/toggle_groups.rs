@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use serde::Deserialize;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::PLUGIN_ID;
 
@@ -12,12 +12,26 @@ use crate::PLUGIN_ID;
 
 #[derive(Debug, Clone, Deserialize)]
 struct ToggleGroupToml {
-    map: String,
-    toggle: String,
-    on: Option<String>,
-    off: Option<String>,
+    id: String,
+    name: String,
     #[serde(default)]
-    exclude: bool,
+    description: Option<String>,
+
+    map: String,
+    #[serde(default)]
+    toggle: Option<String>,
+    #[serde(default)]
+    on: Option<String>,
+    #[serde(default)]
+    off: Option<String>,
+
+    #[serde(default)]
+    label_on: Option<String>,
+    #[serde(default)]
+    label_off: Option<String>,
+
+    #[serde(default)]
+    start_on: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -28,28 +42,45 @@ struct ToggleGroupsFile {
 
 // ── Public types ────────────────────────────────────────────────────────────────
 
-/// A resolved toggle group: toggle action name + optional enable/disable siblings.
+/// A curated toggle group.
 #[derive(Debug, Clone)]
 pub struct ToggleGroup {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+
     pub map: String,
-    pub toggle: String,
+    pub toggle: Option<String>,
     pub on: Option<String>,
     pub off: Option<String>,
+
+    pub label_on: Option<String>,
+    pub label_off: Option<String>,
+
+    pub start_on: bool,
 }
 
 /// Indexed toggle group data for O(1) lookup.
 #[derive(Debug, Clone, Default)]
 pub struct ToggleGroupsData {
-    /// All groups, ordered by map then toggle name.
+    /// All groups, in source order.
     pub groups: Vec<ToggleGroup>,
-    /// `"map.toggle"` → index into `groups`.
+    /// `id` → index into `groups`.
     pub index: HashMap<String, usize>,
+    /// Legacy `"map.toggle"` → index, for migrating saved settings.
+    pub legacy_index: HashMap<String, usize>,
 }
 
 impl ToggleGroupsData {
-    /// Look up a group by its compound key (`"map.toggle"`).
-    pub fn get(&self, key: &str) -> Option<&ToggleGroup> {
-        self.index.get(key).map(|&i| &self.groups[i])
+    /// Look up a group by its stable `id`.
+    pub fn get(&self, id: &str) -> Option<&ToggleGroup> {
+        self.index.get(id).map(|&i| &self.groups[i])
+    }
+
+    /// Look up by the legacy `"map.toggle"` compound key. Used to migrate
+    /// settings saved under the old schema.
+    pub fn get_by_legacy_key(&self, key: &str) -> Option<&ToggleGroup> {
+        self.legacy_index.get(key).map(|&i| &self.groups[i])
     }
 
     /// Iterate all groups.
@@ -92,46 +123,22 @@ impl ToggleGroupsState {
 // ── Loading & merging ───────────────────────────────────────────────────────────
 
 fn load_and_merge() -> ToggleGroupsData {
-    // 1. Load bundled TOML (next to the exe, in the .sdPlugin directory)
-    let mut groups = load_bundled();
+    let mut groups = load_toml_file(&bundled_toml_path()).unwrap_or_default();
 
-    // 2. Merge user override TOML from AppData
-    let user_groups = load_user_override();
-    merge_overrides(&mut groups, user_groups);
-
-    // 3. Build index
-    build_indexed(groups)
-}
-
-fn load_bundled() -> Vec<ToggleGroup> {
-    let path = bundled_toml_path();
-    debug!(
-        "Looking for bundled toggle-groups.toml at {}",
-        path.display()
-    );
-    load_toml_file(&path).unwrap_or_default()
-}
-
-fn load_user_override() -> Vec<(ToggleGroupToml, bool)> {
-    let Some(path) = user_toml_path() else {
-        return vec![];
-    };
-    debug!("Looking for user toggle-groups.toml at {}", path.display());
-    match std::fs::read_to_string(&path) {
-        Ok(content) if !content.trim().is_empty() => {
-            match toml::from_str::<ToggleGroupsFile>(&content) {
-                Ok(file) => {
-                    debug!("Loaded {} user toggle group override(s)", file.group.len());
-                    file.group.into_iter().map(|g| (g, true)).collect()
-                }
-                Err(e) => {
-                    warn!("Failed to parse user toggle-groups.toml: {e}");
-                    vec![]
-                }
+    // User overrides: replace by `id`, or append if new.
+    if let Some(user_path) = user_toml_path()
+        && let Some(user_groups) = load_toml_file(&user_path)
+    {
+        for ug in user_groups {
+            if let Some(existing) = groups.iter_mut().find(|g| g.id == ug.id) {
+                *existing = ug;
+            } else {
+                groups.push(ug);
             }
         }
-        _ => vec![],
     }
+
+    build_indexed(groups)
 }
 
 fn load_toml_file(path: &std::path::Path) -> Option<Vec<ToggleGroup>> {
@@ -140,20 +147,23 @@ fn load_toml_file(path: &std::path::Path) -> Option<Vec<ToggleGroup>> {
         return Some(vec![]);
     }
     match toml::from_str::<ToggleGroupsFile>(&content) {
-        Ok(file) => {
-            let groups = file
-                .group
+        Ok(file) => Some(
+            file.group
                 .into_iter()
-                .filter(|g| !g.exclude)
                 .map(|g| ToggleGroup {
+                    id: g.id,
+                    name: g.name,
+                    description: g.description,
                     map: g.map,
-                    toggle: g.toggle,
-                    on: g.on,
-                    off: g.off,
+                    toggle: g.toggle.filter(|s| !s.is_empty()),
+                    on: g.on.filter(|s| !s.is_empty()),
+                    off: g.off.filter(|s| !s.is_empty()),
+                    label_on: g.label_on.filter(|s| !s.is_empty()),
+                    label_off: g.label_off.filter(|s| !s.is_empty()),
+                    start_on: g.start_on,
                 })
-                .collect();
-            Some(groups)
-        }
+                .collect(),
+        ),
         Err(e) => {
             warn!("Failed to parse {}: {e}", path.display());
             None
@@ -161,44 +171,22 @@ fn load_toml_file(path: &std::path::Path) -> Option<Vec<ToggleGroup>> {
     }
 }
 
-fn merge_overrides(base: &mut Vec<ToggleGroup>, overrides: Vec<(ToggleGroupToml, bool)>) {
-    for (ovr, _is_user) in overrides {
-        let key = format!("{}.{}", ovr.map, ovr.toggle);
-
-        if ovr.exclude {
-            // Remove the group from base
-            base.retain(|g| format!("{}.{}", g.map, g.toggle) != key);
-            debug!("User excluded toggle group: {key}");
-            continue;
-        }
-
-        // Replace existing or append
-        if let Some(existing) = base
-            .iter_mut()
-            .find(|g| g.map == ovr.map && g.toggle == ovr.toggle)
-        {
-            existing.on = ovr.on;
-            existing.off = ovr.off;
-            debug!("User overrode toggle group: {key}");
-        } else {
-            base.push(ToggleGroup {
-                map: ovr.map,
-                toggle: ovr.toggle,
-                on: ovr.on,
-                off: ovr.off,
-            });
-            debug!("User added toggle group: {key}");
-        }
-    }
-}
-
 fn build_indexed(groups: Vec<ToggleGroup>) -> ToggleGroupsData {
     let mut index = HashMap::with_capacity(groups.len());
+    let mut legacy_index = HashMap::with_capacity(groups.len());
     for (i, g) in groups.iter().enumerate() {
-        let key = format!("{}.{}", g.map, g.toggle);
-        index.insert(key, i);
+        if index.insert(g.id.clone(), i).is_some() {
+            warn!("Duplicate toggle group id: {}", g.id);
+        }
+        if let Some(ref t) = g.toggle {
+            legacy_index.insert(format!("{}.{}", g.map, t), i);
+        }
     }
-    ToggleGroupsData { groups, index }
+    ToggleGroupsData {
+        groups,
+        index,
+        legacy_index,
+    }
 }
 
 // ── Paths ───────────────────────────────────────────────────────────────────────

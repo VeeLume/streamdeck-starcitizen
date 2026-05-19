@@ -4,7 +4,6 @@ $PluginId   = "icu.veelume.starcitizen"
 $SdPlugin   = "$PSScriptRoot/../icu.veelume.starcitizen.sdPlugin"
 $BinDir     = "$SdPlugin/bin"
 $PluginExe  = "$BinDir/$PluginId.exe"
-$GenExe     = "$BinDir/toggle-groups-gen.exe"
 
 # ── Stop plugin ──────────────────────────────────────────────────────────────────
 
@@ -34,7 +33,6 @@ for ($i = 0; $i -lt $Timeout; $i++) {
 
 Write-Host ">> Copying binaries..." -ForegroundColor Yellow
 Copy-Item "target/release/plugin.exe" $PluginExe -Force
-Copy-Item "target/release/toggle-groups-gen.exe" $GenExe -Force
 
 # ── Restart plugin ───────────────────────────────────────────────────────────────
 

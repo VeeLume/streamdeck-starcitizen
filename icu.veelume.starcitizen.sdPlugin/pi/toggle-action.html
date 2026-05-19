@@ -73,6 +73,10 @@
     <!-- ══════════════════════════ GROUP INFO ════════════════════════════ -->
 
     <div id="groupInfo">
+        <sdpi-item label="">
+            <p id="groupDescription" style="font-size: 11px; color: #aaa; margin: 0; display: none;"></p>
+        </sdpi-item>
+
         <sdpi-item label="Mode">
             <div style="display:flex;align-items:center;gap:8px">
                 <span id="modeText" style="font-size: 12px; color: #aaa;">—</span>
@@ -240,6 +244,15 @@
             }
 
             if (data.type === 'uiState') {
+                // Group description (curator-provided)
+                const descEl = document.getElementById('groupDescription');
+                if (data.groupDescription) {
+                    descEl.textContent = data.groupDescription;
+                    descEl.style.display = '';
+                } else {
+                    descEl.style.display = 'none';
+                }
+
                 // Mode display
                 const modeEl = document.getElementById('modeText');
                 if (data.isSmart) {

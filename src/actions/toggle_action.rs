@@ -28,8 +28,14 @@ const RESYNC_HOLD_MS: u64 = 800;
 // ── Action ──────────────────────────────────────────────────────────────────────
 
 pub struct ToggleAction {
-    // Group selection (from TOML)
-    group: String, // "map.toggle" compound key, or empty for Custom
+    // Group selection (curated TOML id, or empty for Custom)
+    group: String,
+
+    // Cached group metadata (resolved from TOML; empty when Custom)
+    group_name: String,
+    group_description: String,
+    group_label_on: String,
+    group_label_off: String,
 
     // Resolved action names (from group or overrides)
     toggle_map: String,
@@ -62,6 +68,10 @@ impl Default for ToggleAction {
     fn default() -> Self {
         Self {
             group: String::new(),
+            group_name: String::new(),
+            group_description: String::new(),
+            group_label_on: String::new(),
+            group_label_off: String::new(),
             toggle_map: String::new(),
             toggle_action: String::new(),
             enable_map: String::new(),
@@ -144,6 +154,11 @@ impl Action for ToggleAction {
             self.disable_action.clear();
             self.states_swapped = false;
             self.resolve_group(cx);
+            // Adopt the new group's starting-state default.
+            if let Some(default_start_on) = lookup_group_start_on(cx, &self.group) {
+                self.start_on = default_start_on;
+                self.is_on = default_start_on;
+            }
             self.save_settings(cx, ev.context);
             self.send_ui_state(cx, ev.context);
         }
@@ -364,6 +379,16 @@ impl ToggleAction {
     ) {
         if let Some(v) = settings.get("group").and_then(|v| v.as_str()) {
             self.group = v.to_string();
+            // Migrate legacy "map.toggle" group keys to the new stable id.
+            if let Some(tg_state) = cx.try_ext::<ToggleGroupsState>() {
+                let snap = tg_state.snapshot();
+                if snap.get(&self.group).is_none()
+                    && let Some(g) = snap.get_by_legacy_key(&self.group)
+                {
+                    debug!("Migrating legacy group key {} → {}", self.group, g.id);
+                    self.group = g.id.clone();
+                }
+            }
         }
         if let Some(v) = settings.get("toggleMap").and_then(|v| v.as_str()) {
             self.toggle_map = v.to_string();
@@ -418,11 +443,18 @@ impl ToggleAction {
         self.resolve_group(cx);
     }
 
-    /// Resolve the TOML group into action fields.
+    /// Resolve the TOML group into action fields and cached metadata.
     ///
     /// If a group is selected and the override fields are empty, fill them
-    /// from the TOML definition.
+    /// from the TOML definition. Always refreshes cached display metadata
+    /// (name, description, labels) from the group.
     fn resolve_group(&mut self, cx: &Context) {
+        // Clear cached metadata; refilled below if a group is selected.
+        self.group_name.clear();
+        self.group_description.clear();
+        self.group_label_on.clear();
+        self.group_label_off.clear();
+
         if self.group.is_empty() {
             return;
         }
@@ -435,10 +467,24 @@ impl ToggleAction {
             return;
         };
 
-        // Fill from TOML if override fields are empty
-        if self.toggle_action.is_empty() {
+        // Cache display metadata
+        self.group_name = g.name.clone();
+        if let Some(ref d) = g.description {
+            self.group_description = d.clone();
+        }
+        if let Some(ref l) = g.label_on {
+            self.group_label_on = l.clone();
+        }
+        if let Some(ref l) = g.label_off {
+            self.group_label_off = l.clone();
+        }
+
+        // Fill action fields from TOML if override fields are empty
+        if self.toggle_action.is_empty()
+            && let Some(ref t) = g.toggle
+        {
             self.toggle_map = g.map.clone();
-            self.toggle_action = g.toggle.clone();
+            self.toggle_action = t.clone();
         }
         if self.enable_action.is_empty()
             && let Some(ref on) = g.on
@@ -611,6 +657,16 @@ impl ToggleAction {
             return custom_title.clone();
         }
 
+        // Curator-provided label from the group definition wins over auto-derivation.
+        let group_label = if is_on {
+            &self.group_label_on
+        } else {
+            &self.group_label_off
+        };
+        if !group_label.is_empty() {
+            return group_label.clone();
+        }
+
         if self.toggle_action.is_empty() {
             return if is_on {
                 "ON".to_string()
@@ -723,6 +779,8 @@ impl ToggleAction {
             serde_json::json!({
                 "type": "uiState",
                 "group": self.group,
+                "groupName": self.group_name,
+                "groupDescription": self.group_description,
                 "isSmart": self.has_smart_actions(),
                 "startOn": self.start_on,
                 "isOn": self.is_on,
@@ -770,10 +828,11 @@ impl ToggleAction {
 
     // ── Datasource: groups ──────────────────────────────────────────────────────
 
-    /// Reply with all TOML groups organized by category for the PI dropdown.
+    /// Reply with all curated groups organized by actionmap for the PI dropdown.
     ///
-    /// Groups are ordered by the actionmap order from `ParsedBindings` (matching
-    /// the in-game keybinding UI), not the TOML file order.
+    /// Each group's `name` is the dropdown label and `id` is the saved value.
+    /// Groups are ordered by actionmap order from `ParsedBindings` (matching
+    /// the in-game keybinding UI), then by source order within each map.
     fn reply_groups(&self, cx: &Context, req: &DataSourceRequest<'_>) {
         let Some(tg_state) = cx.try_ext::<ToggleGroupsState>() else {
             cx.sdpi().reply(req, vec![]);
@@ -782,7 +841,7 @@ impl ToggleAction {
         let snap = tg_state.snapshot();
         let bindings_state = cx.try_ext::<BindingsState>();
 
-        // Index TOML groups by map name for quick lookup
+        // Index curated groups by map name for quick lookup
         let mut groups_by_map: std::collections::HashMap<
             &str,
             Vec<&crate::state::toggle_groups::ToggleGroup>,
@@ -798,7 +857,6 @@ impl ToggleAction {
             bs.with_bindings(|bindings| {
                 let mut seen_maps = std::collections::HashSet::new();
                 for am in &bindings.action_maps {
-                    // Deduplicate by map name (same map can appear multiple times)
                     if !seen_maps.insert(am.name.as_ref()) {
                         continue;
                     }
@@ -806,20 +864,14 @@ impl ToggleAction {
                         continue;
                     };
 
-                    let mut children: Vec<DataSourceItem> = Vec::new();
-                    for g in map_groups {
-                        let toggle_label =
-                            shared::resolve_action_label(&bindings_state, &g.map, &g.toggle);
-                        let key = format!("{}.{}", g.map, g.toggle);
-                        let has_on_off = g.on.is_some() || g.off.is_some();
-                        let suffix = if has_on_off { "" } else { " (toggle only)" };
-
-                        children.push(DataSourceItem {
+                    let children: Vec<DataSourceItem> = map_groups
+                        .into_iter()
+                        .map(|g| DataSourceItem {
                             disabled: None,
-                            label: Some(format!("{toggle_label}{suffix}")),
-                            value: key,
-                        });
-                    }
+                            label: Some(g.name.clone()),
+                            value: g.id.clone(),
+                        })
+                        .collect();
 
                     if !children.is_empty() {
                         items.push(DataSourceResultItem::Group(DataSourceGroup {
@@ -831,19 +883,17 @@ impl ToggleAction {
             });
         }
 
-        // Append any remaining TOML groups whose maps weren't in bindings
-        // (shouldn't happen normally, but handles edge cases)
+        // Append any remaining groups whose maps weren't in the bindings
+        // (e.g., user-added groups for maps the parser hasn't seen).
         for (map_name, map_groups) in groups_by_map {
-            let mut children: Vec<DataSourceItem> = Vec::new();
-            for g in map_groups {
-                let toggle_label = shared::resolve_action_label(&bindings_state, &g.map, &g.toggle);
-                let key = format!("{}.{}", g.map, g.toggle);
-                children.push(DataSourceItem {
+            let children: Vec<DataSourceItem> = map_groups
+                .into_iter()
+                .map(|g| DataSourceItem {
                     disabled: None,
-                    label: Some(toggle_label),
-                    value: key,
-                });
-            }
+                    label: Some(g.name.clone()),
+                    value: g.id.clone(),
+                })
+                .collect();
             if !children.is_empty() {
                 let map_label = shared::resolve_map_label(&bindings_state, map_name);
                 items.push(DataSourceResultItem::Group(DataSourceGroup {
@@ -897,6 +947,16 @@ fn strip_toggle_prefix(label: &str) -> &str {
         }
     }
     label
+}
+
+/// Look up a group's `start_on` default from the curated TOML.
+fn lookup_group_start_on(cx: &Context, group_id: &str) -> Option<bool> {
+    if group_id.is_empty() {
+        return None;
+    }
+    let tg_state = cx.try_ext::<ToggleGroupsState>()?;
+    let snap = tg_state.snapshot();
+    snap.get(group_id).map(|g| g.start_on)
 }
 
 /// Capitalize the first character of a string.

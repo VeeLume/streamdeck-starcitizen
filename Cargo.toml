@@ -14,8 +14,8 @@ name = "extract-p4k"
 path = "src/bin/extract_p4k.rs"
 
 [[bin]]
-name = "toggle-groups-gen"
-path = "src/bin/toggle_groups_gen.rs"
+name = "report-builder"
+path = "src/bin/report_builder.rs"
 
 [dependencies]
 anyhow           = "1"
