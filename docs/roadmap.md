@@ -84,26 +84,21 @@ the design lives in [features/dial-action.md](features/dial-action.md); treat
 it as a starting point, not a committed plan.
 
 ### Game-log telemetry adapter (coarse events only)
-Tail the active installation's `Game.log` and emit typed topics for events
-that actually appear:
+Tail the active installation's `Game.log` and emit typed topics for the
+events SC actually writes: session start, channel connect, zone loads,
+armistice transitions, QT target/arrival, session end. No toggle-state,
+combat, or runtime-binding events — those aren't in the log.
 
-- Quantum travel: target selected, route calculated (with fuel estimate),
-  arrival.
-- Login / session / character.
-- Zone transitions (Armistice enter/leave).
+Enables new *informational* actions later (QT status, zone indicator, etc.)
+without touching existing ones. Novel feature; neither competitor does this.
 
-**Not viable**: per-item-port state (landing gear, power, doors, shields,
-cargo). Star Citizen does not log these. Toggle-action sync via logs is off
-the table.
-
-Shape: a new `GameLogAdapter` (OnAppLaunch policy) reading the latest
-`<install>/Game.log`, publishing topics such as `QT_STATE_CHANGED`,
-`ZONE_CHANGED`, `SESSION_CHANGED`. New actions (e.g. "QT status") can
-subscribe; existing actions ignore it.
+Spec: [features/game-log-telemetry.md](features/game-log-telemetry.md).
 
 ### Audio feedback per action
-Optional WAV playback on `key_down`. Small crate (`rodio`). Per-action PI
-control for file path; silent by default.
+Optional WAV/MP3/OGG playback on `key_down` via `rodio` in a new
+`AudioAdapter`. Per-action PI file picker; silent by default.
+
+Spec: [features/audio-feedback.md](features/audio-feedback.md).
 
 ## T2 — Companion app (tracked separately)
 
@@ -134,10 +129,32 @@ Allow users to drop a custom `global.ini` (e.g. community German translation)
 into `%APPDATA%/icu.veelume.starcitizen/localization/<lang>/` to override the
 one from `Data.p4k`. Cheap extension to the existing translations module.
 
+### Read live in-game default states from `attributes.xml`
+Today, `start_on` in `toggle-groups.toml` is a hand-curated guess at SC's
+shipped defaults. The actual current values are persisted per profile in
+`C:\Games\StarCitizen\LIVE\user\client\0\Profiles\default\attributes.xml`
+(e.g. `FlightController_Setting_AdvancedHudLabelsEnabled`). A small parser
+that reads this file at startup and overrides `start_on` per group based on
+the matching attribute would keep the deck button state aligned with the
+player's actual settings rather than our static guess. Needs a mapping from
+group id → attribute name; cheap if the matching is hand-curated.
+
+### Multi-state toggle groups (3+ states)
+Some SC actions are N-way cycles rather than binary toggles — e.g. turret mouse
+mode (vjoy / 1to1 / pointer), the seat operator-mode group (mining / scan /
+salvage / quantum / …), or transform configurations on certain ships. Today
+the toggle action only models on/off. A future "cycle group" type could declare
+an ordered list of `set_*` actions with per-state labels/icons, and the deck
+button would advance through them. Prerequisite for a clean Master Mode +
+operator-mode UX without juggling separate toggle entries.
+
 ### Misc
 - Expose advanced autofill settings in Generate Binds PI (only after we decide
   whether this moves to the companion app instead).
 - One-click profile import into SC after Generate Binds completes.
+- Test whether `spaceship_auto_weapons.v_weapon_toggle_ai` is a usable toggle
+  for the deck (toggles AI gunner control; only one action in its actionmap, so
+  the discovery report doesn't surface it as a candidate).
 
 ## Deferred
 
